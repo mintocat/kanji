@@ -1,4 +1,4 @@
-import { db, ref, set, get, onValue, update } from '../../js/firebase-config.js';
+import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 
 // URLからルームIDを取得
 const urlParams = new URLSearchParams(window.location.search);

@@ -13,14 +13,17 @@
         .hidden { display: none; }
         #name-setup { background: rgba(139, 0, 0, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px dashed #8b0000; }
         #display-my-name { font-weight: bold; color: #8b0000; }
-        #correct-word-display { font-size: 2.5rem; color: #8b0000; margin: 10px 0; letter-spacing: 0.5rem; }
+        
+        /* 正解表示を赤字に変更 */
+        #correct-word-display { font-size: 2.5rem; color: #ff0000; margin: 10px 0; letter-spacing: 0.5rem; font-weight: bold; }
         
         #lobby-ui { text-align: center; margin-top: 20px; }
         .lobby-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; background: white; border-radius: 8px; }
-
-        /* 参加者リストのスタイル */
         #player-list-area { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; font-size: 0.9rem; }
         .player-tag { display: inline-block; background: #8b0000; color: white; padding: 2px 8px; border-radius: 15px; margin: 2px; }
+        
+        /* 投票中ボタンのスタイル */
+        .voting { background: #ffae00 !important; }
     </style>
 </head>
 <body>
@@ -61,19 +64,19 @@
             <div id="play-ui" class="hidden">
                 <input type="text" id="answer-input" placeholder="熟語を答えろ！">
                 <button id="submit-btn">解答を送信</button>
-                <p id="wait-msg" class="hidden">次の画までお待ちください...</p>
+                <hr>
+                <button id="stroke-vote-btn">次の画へ（投票: <span id="stroke-vote-count">0</span>）</button>
+                <p id="wait-msg" class="hidden">解答送信済み。次の画をお待ちください...</p>
             </div>
 
             <div id="result-ui" class="hidden">
                 <h2 id="winner-msg"></h2>
                 <p>正解は：</p>
                 <h3 id="correct-word-display"></h3>
-                <button id="next-game-btn">次のゲームへ</button>
+                <button id="next-game-btn">次のゲームへ（投票: <span id="game-vote-count">0</span>）</button>
             </div>
 
             <button id="start-btn" class="hidden">ゲーム開始（ホストのみ）</button>
-            <br>
-            <button onclick="location.href='index.html'">ロビーへ退出する</button>
         </div>
     </div>
     <script type="module" src="./script.js"></script>

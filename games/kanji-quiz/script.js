@@ -1,3 +1,4 @@
+// 1行目から「get」を削除しました
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 
 // URLからルームIDを取得
@@ -39,16 +40,16 @@ window.addEventListener('DOMContentLoaded', () => {
             const roomRef = ref(db, `rooms/kanji-quiz/${newRoomId}/state`);
             
             try {
+                // ここは set を使うのでエラーになりません
                 await set(roomRef, {
                     status: "waiting",
                     hostId: myId,
                     createdAt: Date.now()
                 });
-                // 作成成功したら遷移
                 window.location.href = `?room=${newRoomId}`;
             } catch (e) {
                 console.error("Room creation error:", e);
-                alert("ルーム作成に失敗しました。Firebaseの設定を確認してください。");
+                alert("ルーム作成に失敗しました。");
             }
         };
 

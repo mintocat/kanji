@@ -1,4 +1,6 @@
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
+// ① 問題を別ファイルからインポート
+import { wordList } from './words.js';
 
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
@@ -52,12 +54,32 @@ window.addEventListener('DOMContentLoaded', () => {
         let lastRenderedIndex = -1;
         let nextStepTimer = null;
         let playerCount = 0;
+        let currentWordForReset = ""; // ③ バグ対策用の内部変数
 
         onValue(ref(db, `rooms/kanji-quiz/${roomId}/players`), (snapshot) => {
             const players = snapshot.val() || {};
             playerCount = Object.keys(players).length;
             const listHtml = Object.values(players).map(name => `<span class="player-tag">${name}</span>`).join('');
             document.getElementById('player-list').innerHTML = listHtml;
+        });
+
+        // ② 勝ち回数を監視
+        onValue(ref(db, `rooms/kanji-quiz/${roomId}/scores`), (snapshot) => {
+            const scores = snapshot.val() || {};
+            const scoreListEl = document.getElementById('score-list');
+            scoreListEl.innerHTML = "";
+            
+            // プレイヤーIDから名前を引くために一旦全プレイヤーを取得
+            onValue(ref(db, `rooms/kanji-quiz/${roomId}/players`), (pSnap) => {
+                const players = pSnap.val() || {};
+                Object.entries(scores).forEach(([pId, score]) => {
+                    const name = players[pId] || "不明";
+                    const item = document.createElement('div');
+                    item.className = "score-item";
+                    item.innerHTML = `<span>${name}</span><span>${score}回</span>`;
+                    scoreListEl.appendChild(item);
+                });
+            }, { onlyOnce: true });
         });
 
         async function getStrokes(char, charIndex) {
@@ -73,7 +95,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         async function setupNewGame() {
-            const wordList = ["漢字", "学校", "先生", "学生", "大学", "授業", "教室", "試験", "答案", "成績", "勉強", "宿題", "図書", "図書室", "黒板", "机上", "椅子", "校庭", "体育", "音楽", "理科", "社会", "数学", "国語", "英語", "科学", "文化", "歴史", "世界", "社会", "国家", "政治", "経済", "法律", "政府", "市民", "国民", "平和", "戦争", "自由", "権利", "義務", "責任", "協力", "努力", "成功", "失敗", "経験", "成長", "発展", "進歩", "変化", "自然", "宇宙", "地球", "太陽", "月光", "星空", "海洋", "山川", "森林", "草原", "動物", "植物", "空気", "水道", "電気", "電話", "写真", "映画", "音声", "映像", "新聞", "雑誌", "放送", "情報", "通信", "交通", "道路", "鉄道", "新幹線", "駅前", "空港", "飛行", "旅行", "観光", "都市", "地方", "住宅", "建物", "会社", "企業", "仕事", "労働", "商売", "商品", "市場", "価格", "利益", "損失", "銀行", "通貨", "財政", "税金", "保険", "医療", "病院", "看護", "治療", "健康", "運動", "食事", "睡眠", "家族", "親子", "兄弟", "友人", "恋愛", "結婚", "人生", "未来", "現在", "過去", "時間", "瞬間", "一日", "一年", "毎日", "今日", "明日", "昨日", "今夜", "朝日", "夕日", "夜空", "朝食", "昼食", "夕食", "料理", "飲料", "果物", "野菜", "肉類", "魚類", "米飯", "食堂", "台所", "冷蔵庫", "電子", "電車", "地下鉄", "高速道", "交差点", "信号機", "歩行者", "自転車", "運転手", "乗客", "改札口", "発車", "到着", "停車", "空席", "満席", "切符", "定期券", "旅行者", "観光地", "名所", "温泉", "旅館", "宿泊", "観察", "研究", "発見", "発明", "実験", "分析", "理論", "仮説", "証明", "理解", "説明", "確認", "連絡", "報告", "発表", "計画", "実行", "判断", "決定", "管理", "指導", "教育者", "研究者", "科学者", "技術者", "経営者", "政治家", "芸術家", "作家", "画家", "音楽家", "俳優", "歌手", "映画館", "美術館", "博物館", "図書館", "体育館", "公園", "遊園地", "動物園", "植物園", "展覧会", "大会", "競技", "試合", "優勝", "敗北", "記録", "得点", "観客", "選手", "監督", "審判", "練習", "体力", "健康法", "運動会", "文化祭", "学園祭", "卒業式", "入学式", "始業式", "終業式", "表彰式", "発言", "会議", "討論", "意見", "提案", "反対", "賛成", "協議", "合意", "対話", "交渉", "契約", "条件", "規則", "大丈夫", "大成功", "大失敗", "大問題", "大事件", "大事故", "大発見", "大自然", "小学生", "中学生", "高校生", "大学生", "外国人", "日本人", "世界中", "全世界", "全人類", "一部分", "一時間", "長時間", "短時間", "大都市", "新世界", "旧世界", "大気圏", "新技術", "旧制度", "高速度", "低温度", "高温度", "大雨天", "強風雨", "小規模", "大規模", "新計画", "旧計画", "全体像", "部分図", "大変化", "大革命", "新社会", "旧社会", "全国家", "大経済", "大市場", "大企業", "小企業", "大成功例", "新記録", "容容漾漾", "一期一会", "一石二鳥", "一心同体", "一生懸命", "一目瞭然", "一刀両断", "異口同音", "温故知新", "起死回生", "試行錯誤", "自業自得", "自給自足", "自画自賛", "順風満帆", "十人十色", "千変万化", "前代未聞", "単刀直入", "電光石火", "天真爛漫", "日進月歩", "馬耳東風", "百発百中", "半信半疑", "臨機応変", "優柔不断", "意味深長", "焼肉定食", "危機一髪", "公明正大", "古今東西", "五里霧中", "四面楚歌", "弱肉強食", "正々堂々", "大同小異", "大器晩成", "朝三暮四", "東奔西走", "八方美人", "表裏一体", "本末転倒", "無我夢中", "勇往邁進", "用意周到", "和洋折衷", "因果応報", "以心伝心", "電光雷鳴", "風林火山", "森羅万象", "天地無用", "臨機応変", "完全無欠", "公私混同", "自信満々", "疑心暗鬼", "優勝劣敗", "千差万別", "意気投合", "危機管理", "事実無根", "自由自在", "迅速果断", "大胆不敵", "単純明快", "天衣無縫", "天下無敵", "東西南北", "南船北馬", "難攻不落", "二律背反", "白黒分明", "百花繚乱", "不言実行", "粉骨砕身", "満身創痍", "面目躍如", "無病息災", "有言実行"];
+            // ① 分離したwords.jsのリストを使用
             const word = wordList[Math.floor(Math.random() * wordList.length)];
             let allStrokes = [];
             for (let i = 0; i < word.length; i++) {
@@ -116,7 +138,14 @@ window.addEventListener('DOMContentLoaded', () => {
                 playUi.classList.remove('hidden');
                 resultUi.classList.add('hidden');
                 
-                // 正解者が出た場合は全画表示、そうでなければ現在の画まで
+                // ③ バグ修正：単語が変わっていたら強制リセット
+                if (currentWord !== currentWordForReset) {
+                    const stage = document.getElementById('kanji-stage');
+                    stage.innerHTML = '';
+                    lastRenderedIndex = -1;
+                    currentWordForReset = currentWord;
+                }
+
                 const isCorrect = data.lastGuess?.correct;
                 updateCanvas(data, isCorrect);
 
@@ -140,11 +169,9 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // 次のゲーム投票
             const gVotes = data.gameVotes ? Object.keys(data.gameVotes).length : 0;
             document.getElementById('game-vote-count').innerText = `${gVotes}/${playerCount}`;
             if (isHost && gVotes >= playerCount && playerCount > 0) {
-                // 投票が揃ったらリセットして開始
                 update(ref(db, `rooms/kanji-quiz/${roomId}/state`), { gameVotes: {} });
                 setupNewGame();
             }
@@ -152,6 +179,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
         function updateCanvas(data, showAll = false) {
             const stage = document.getElementById('kanji-stage');
+            // ③ バグ修正：文字数の一致だけでなく、現在のHTMLとの整合性をチェック
             if (stage.children.length !== currentWord.length) {
                 stage.innerHTML = '';
                 for (let i = 0; i < currentWord.length; i++) {
@@ -172,7 +200,6 @@ window.addEventListener('DOMContentLoaded', () => {
                 if(!svg) continue;
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 path.setAttribute("d", stroke.d);
-                // 正解時は赤色にする
                 if (showAll) path.style.stroke = "#ff0000";
                 svg.appendChild(path);
                 lastRenderedIndex = i;
@@ -200,8 +227,19 @@ window.addEventListener('DOMContentLoaded', () => {
             const input = document.getElementById('answer-input');
             const guess = input.value.trim();
             if (!guess) return;
+
+            const isCorrect = (guess === currentWord);
+            
+            // ② 正解した場合、自分のスコアを加算
+            if (isCorrect) {
+                onValue(ref(db, `rooms/kanji-quiz/${roomId}/scores/${myId}`), (snapshot) => {
+                    const currentScore = snapshot.val() || 0;
+                    update(ref(db, `rooms/kanji-quiz/${roomId}/scores`), { [myId]: currentScore + 1 });
+                }, { onlyOnce: true });
+            }
+
             update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
-                lastGuess: { user: myName, text: guess, correct: (guess === currentWord) }
+                lastGuess: { user: myName, text: guess, correct: isCorrect }
             });
             input.value = "";
             document.getElementById('wait-msg').classList.remove('hidden');
@@ -209,12 +247,10 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         document.getElementById('stroke-vote-btn').onclick = () => {
-            // 投票をセット
             update(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes`), { [myId]: true });
         };
 
         document.getElementById('next-game-btn').onclick = () => {
-            // 次のゲームへの投票
             update(ref(db, `rooms/kanji-quiz/${roomId}/state/gameVotes`), { [myId]: true });
         };
 

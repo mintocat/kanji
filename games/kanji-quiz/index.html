@@ -6,32 +6,52 @@
     <link rel="stylesheet" href="../../style.css">
     <style>
         #kanji-stage {
-            width: 300px;
-            height: 300px;
-            background: #fff;
-            border: 5px double #8b0000;
-            margin: 20px auto;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+            min-height: 220px;
+        }
+        .kanji-box {
+            width: 150px;
+            height: 150px;
+            background: white;
+            border: 3px solid #8b0000;
+            border-radius: 8px;
         }
         svg { width: 100%; height: 100%; }
         path { fill: none; stroke: #333; stroke-width: 3; stroke-linecap: round; }
+        
+        #announcement {
+            height: 30px;
+            color: #8b0000;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
     <div id="game-container">
         <h1>漢字当てクイズ</h1>
-        <div id="kanji-stage">
-            <svg id="quiz-svg" viewBox="0 0 109 109"></svg>
-        </div>
+        <div id="room-info">ルーム: <span id="display-room-id">-</span></div>
         
-        <div id="answer-zone">
+        <div id="announcement"></div>
+
+        <div id="kanji-stage"></div>
+        
+        <div id="play-ui" class="hidden">
             <input type="text" id="answer-input" placeholder="熟語を答えろ！">
-            <button id="submit-btn">決定</button>
+            <button id="submit-btn">解答を送信</button>
+            <p id="wait-msg" class="hidden">他のプレイヤーの解答を待っています...</p>
         </div>
 
-        <p id="message">準備ができたら開始ボタンを押してください</p>
-        <button id="start-btn">ゲーム開始</button>
-        <br>
-        <button onclick="location.href='../../index.html'">ホームへ戻る</button>
+        <div id="result-ui" class="hidden">
+            <h2 id="winner-msg"></h2>
+            <button id="next-game-btn">次のゲームへ</button>
+        </div>
+
+        <button id="start-btn">ゲーム開始（ホストのみ）</button>
     </div>
 
     <script type="module" src="./script.js"></script>

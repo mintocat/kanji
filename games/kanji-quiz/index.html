@@ -17,8 +17,9 @@
         #lobby-ui { text-align: center; margin-top: 20px; }
         .lobby-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; background: white; border-radius: 8px; }
         #player-list-area { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; font-size: 0.9rem; }
-        .player-tag { display: inline-block; background: #8b0000; color: white; padding: 2px 10px; border-radius: 15px; margin: 2px; }
-        .win-count { background: #ffd700; color: #333; font-weight: bold; padding: 0 5px; border-radius: 50%; margin-left: 5px; }
+        .player-tag { display: inline-block; background: #8b0000; color: white; padding: 2px 8px; border-radius: 15px; margin: 2px; }
+        /* 勝ち数用のバッジ */
+        .win-count { background: #ffd700; color: #000; font-weight: bold; padding: 0 5px; border-radius: 5px; margin-left: 5px; font-size: 0.8rem; }
     </style>
 </head>
 <body>
@@ -47,7 +48,7 @@
             <div id="room-info">
                 ルーム: <span id="display-room-id">-</span> | 
                 名前: <span id="display-my-name">未設定</span>
-                <button onclick="location.href='../../index.html'" style="margin-left:15px; font-size:0.7rem;">ホームへ戻る</button>
+                <button onclick="location.href='../../index.html'" style="margin-left:10px;">ホームに戻る</button>
             </div>
 
             <div id="player-list-area">

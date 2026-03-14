@@ -8,13 +8,9 @@ sessionStorage.setItem('myPlayerId', myId);
 let myName = localStorage.getItem('myKanjiName') || "名無しさん";
 
 window.addEventListener('DOMContentLoaded', () => {
-    const lobbyUi = document.getElementById('lobby-ui');
-    const gameUi = document.getElementById('game-ui');
-
     if (!roomId) {
-        // --- ロビー処理 ---
-        lobbyUi.classList.remove('hidden');
-        gameUi.classList.add('hidden');
+        document.getElementById('lobby-ui').classList.remove('hidden');
+        document.getElementById('game-ui').classList.add('hidden');
         document.getElementById('lobby-my-name').innerText = myName;
 
         document.getElementById('save-name-btn').onclick = () => {
@@ -28,8 +24,8 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         document.getElementById('create-room-btn').onclick = async () => {
-            const newRoomId = Math.random().toString(36).substring(2, 8);
-            // 部屋の初期状態を作成
+            // 【変更】ルームIDを3桁の数字に変更
+            const newRoomId = Math.floor(100 + Math.random() * 900).toString();
             await set(ref(db, `rooms/kanji-quiz/${newRoomId}/state`), {
                 status: "waiting",
                 hostId: myId,
@@ -44,13 +40,11 @@ window.addEventListener('DOMContentLoaded', () => {
         };
     } 
     else {
-        // --- ゲーム画面処理 ---
-        lobbyUi.classList.add('hidden');
-        gameUi.classList.remove('hidden');
+        document.getElementById('lobby-ui').classList.add('hidden');
+        document.getElementById('game-ui').classList.remove('hidden');
         document.getElementById('display-room-id').innerText = roomId;
         document.getElementById('display-my-name').innerText = myName;
 
-        // 【修正】参加者登録を確実に実行
         set(ref(db, `rooms/kanji-quiz/${roomId}/players/${myId}`), myName);
 
         let isHost = false;
@@ -58,17 +52,13 @@ window.addEventListener('DOMContentLoaded', () => {
         let shuffledStrokes = [];
         let lastRenderedIndex = -1;
         let nextStepTimer = null;
+        let playerCount = 0;
 
-        // 参加者リストの監視
         onValue(ref(db, `rooms/kanji-quiz/${roomId}/players`), (snapshot) => {
-            const players = snapshot.val();
-            const listEl = document.getElementById('player-list');
-            if (!players) {
-                listEl.innerText = "待機中...";
-                return;
-            }
+            const players = snapshot.val() || {};
+            playerCount = Object.keys(players).length;
             const listHtml = Object.values(players).map(name => `<span class="player-tag">${name}</span>`).join('');
-            listEl.innerHTML = listHtml;
+            document.getElementById('player-list').innerHTML = listHtml;
         });
 
         async function getStrokes(char, charIndex) {
@@ -93,18 +83,18 @@ window.addEventListener('DOMContentLoaded', () => {
             }
             allStrokes.sort(() => Math.random() - 0.5);
 
-            // ゲーム開始時のデータを一括セット
-            await update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
+            await set(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
                 word: word,
                 strokes: allStrokes,
                 currentIndex: 0,
                 status: "playing",
                 hostId: myId,
-                lastGuess: { user: "", text: "", correct: false }
+                lastGuess: { user: "", text: "", correct: false },
+                strokeVotes: {},
+                gameVotes: {}
             });
         }
 
-        // メイン監視ループ
         onValue(ref(db, `rooms/kanji-quiz/${roomId}/state`), (snapshot) => {
             const data = snapshot.val();
             if (!data) return;
@@ -121,17 +111,24 @@ window.addEventListener('DOMContentLoaded', () => {
                 startBtn.classList.toggle('hidden', !isHost);
                 playUi.classList.add('hidden');
                 resultUi.classList.add('hidden');
-                document.getElementById('announcement').innerText = isHost ? "全員揃ったら開始ボタンを押してください" : "ホストが開始するのを待っています...";
             } 
             else if (data.status === "playing") {
                 startBtn.classList.add('hidden');
                 playUi.classList.remove('hidden');
                 resultUi.classList.add('hidden');
                 updateCanvas(data);
+
+                // 画の投票数更新
+                const sVotes = data.strokeVotes ? Object.keys(data.strokeVotes).length : 0;
+                document.getElementById('stroke-vote-count').innerText = `${sVotes}/${playerCount}`;
                 
-                // 【重要】ホストのみ、5秒タイマーを管理
+                // ホストのみ：5秒経過または全員の投票で次へ
                 if (isHost && !data.lastGuess?.correct) {
-                    startStepTimer(data.currentIndex);
+                    if (sVotes >= playerCount && playerCount > 0) {
+                        advanceStroke(data.currentIndex);
+                    } else {
+                        startStepTimer(data.currentIndex);
+                    }
                 }
             }
 
@@ -140,8 +137,15 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (data.lastGuess.correct) {
                     clearTimeout(nextStepTimer);
                     nextStepTimer = null;
-                    showResult(data.lastGuess.user);
+                    showResult(data.lastGuess.user, data.gameVotes);
                 }
+            }
+
+            // 次のゲームへの投票監視
+            const gVotes = data.gameVotes ? Object.keys(data.gameVotes).length : 0;
+            document.getElementById('game-vote-count').innerText = `${gVotes}/${playerCount}`;
+            if (isHost && gVotes >= playerCount && playerCount > 0 && data.lastGuess?.correct) {
+                setupNewGame();
             }
         });
 
@@ -170,43 +174,49 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // --- ホスト用：進行タイマーの改善 ---
-        function startStepTimer(idx) {
-            if (nextStepTimer) return; // 既に動いていれば二重に作らない
-
-            nextStepTimer = setTimeout(() => {
-                nextStepTimer = null; // 実行時にリセット
-                if (idx < shuffledStrokes.length - 1) {
-                    update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
-                        currentIndex: idx + 1
-                    });
-                }
-            }, 5000);
+        // 次の画へ進める処理
+        function advanceStroke(idx) {
+            if (idx < shuffledStrokes.length - 1) {
+                update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
+                    currentIndex: idx + 1,
+                    strokeVotes: {} // 投票をリセット
+                });
+            }
         }
 
-        // 解答送信
+        function startStepTimer(idx) {
+            if (nextStepTimer) return;
+            nextStepTimer = setTimeout(() => {
+                nextStepTimer = null;
+                advanceStroke(idx);
+            }, 5000); // 5秒で自動進行
+        }
+
+        // --- ボタンイベント ---
+
         document.getElementById('submit-btn').onclick = () => {
             const input = document.getElementById('answer-input');
             const guess = input.value.trim();
             if (!guess) return;
-
-            const isCorrect = (guess === currentWord);
-            
-            // lastGuessを一括で更新（反応を確実にする）
             update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
-                lastGuess: {
-                    user: myName,
-                    text: guess,
-                    correct: isCorrect
-                }
+                lastGuess: { user: myName, text: guess, correct: (guess === currentWord) }
             });
-            
             input.value = "";
             document.getElementById('wait-msg').classList.remove('hidden');
             setTimeout(() => document.getElementById('wait-msg').classList.add('hidden'), 2000);
         };
 
-        function showResult(winner) {
+        // 次の画への投票ボタン
+        document.getElementById('stroke-vote-btn').onclick = () => {
+            set(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes/${myId}`), true);
+        };
+
+        // 次のゲームへの投票ボタン
+        document.getElementById('next-game-btn').onclick = () => {
+            set(ref(db, `rooms/kanji-quiz/${roomId}/state/gameVotes/${myId}`), true);
+        };
+
+        function showResult(winner, gameVotes) {
             document.getElementById('play-ui').classList.add('hidden');
             document.getElementById('result-ui').classList.remove('hidden');
             document.getElementById('winner-msg').innerText = `正解！勝者: ${winner}`;
@@ -214,6 +224,5 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         document.getElementById('start-btn').onclick = setupNewGame;
-        document.getElementById('next-game-btn').onclick = setupNewGame;
     }
 });

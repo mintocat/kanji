@@ -15,9 +15,12 @@
         #display-my-name { font-weight: bold; color: #8b0000; }
         #correct-word-display { font-size: 2.5rem; color: #8b0000; margin: 10px 0; letter-spacing: 0.5rem; }
         
-        /* ロビー専用のデザイン */
         #lobby-ui { text-align: center; margin-top: 20px; }
         .lobby-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; background: white; border-radius: 8px; }
+
+        /* 参加者リストのスタイル */
+        #player-list-area { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; font-size: 0.9rem; }
+        .player-tag { display: inline-block; background: #8b0000; color: white; padding: 2px 8px; border-radius: 15px; margin: 2px; }
     </style>
 </head>
 <body>
@@ -30,18 +33,15 @@
                 <input type="text" id="name-input" placeholder="あなたの名前を入力">
                 <button id="save-name-btn">名前を決定</button>
             </div>
-
             <div class="lobby-section">
                 <h3>自分で部屋を作る</h3>
                 <button id="create-room-btn">新しいルームを作成する</button>
             </div>
-
             <div class="lobby-section">
                 <h3>友達の部屋に入る</h3>
                 <input type="text" id="join-room-input" placeholder="ルームIDを入力">
                 <button id="join-room-btn">ルームに入る</button>
             </div>
-            
             <button onclick="location.href='../../index.html'">ホームへ戻る</button>
         </div>
 
@@ -50,6 +50,10 @@
                 ルーム: <span id="display-room-id">-</span> | 
                 名前: <span id="display-my-name">未設定</span>
             </div>
+
+            <div id="player-list-area">
+                参加者: <span id="player-list">読み込み中...</span>
+            </div>
             
             <div id="announcement"></div>
             <div id="kanji-stage"></div>
@@ -57,7 +61,7 @@
             <div id="play-ui" class="hidden">
                 <input type="text" id="answer-input" placeholder="熟語を答えろ！">
                 <button id="submit-btn">解答を送信</button>
-                <p id="wait-msg" class="hidden">全員の解答を待っています（最大5秒）...</p>
+                <p id="wait-msg" class="hidden">次の画までお待ちください...</p>
             </div>
 
             <div id="result-ui" class="hidden">
@@ -68,12 +72,10 @@
             </div>
 
             <button id="start-btn" class="hidden">ゲーム開始（ホストのみ）</button>
-            <br><br>
+            <br>
             <button onclick="location.href='index.html'">ロビーへ退出する</button>
         </div>
-
     </div>
-
     <script type="module" src="./script.js"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
-import { db, ref, set, onValue, update, get } from '../../js/firebase-config.js';
-import { wordList } from './words.js'; // ② 別ファイルから読み込み
+import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
+import { wordList } from './words.js'; // ②別ファイルから読み込み
 
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
@@ -29,8 +29,7 @@ window.addEventListener('DOMContentLoaded', () => {
             await set(ref(db, `rooms/kanji-quiz/${newRoomId}/state`), {
                 status: "waiting",
                 hostId: myId,
-                currentIndex: 0,
-                gameId: Date.now() // ① 状態リセット判定用
+                currentIndex: 0
             });
             window.location.href = `?room=${newRoomId}`;
         };
@@ -46,7 +45,9 @@ window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('display-room-id').innerText = roomId;
         document.getElementById('display-my-name').innerText = myName;
 
-        set(ref(db, `rooms/kanji-quiz/${roomId}/players/${myId}`), myName);
+        // 参加者登録時に勝ち数（wins）も初期化
+        const myPlayerRef = ref(db, `rooms/kanji-quiz/${roomId}/players/${myId}`);
+        update(myPlayerRef, { name: myName });
 
         let isHost = false;
         let currentWord = "";
@@ -54,18 +55,15 @@ window.addEventListener('DOMContentLoaded', () => {
         let lastRenderedIndex = -1;
         let nextStepTimer = null;
         let playerCount = 0;
-        let lastGameId = 0; // ① 描画リセット用
+        let currentWordId = ""; // ①リセットバグ修正用
 
-        // ④ 参加者と勝ち数の表示
-        onValue(ref(db, `rooms/kanji-quiz/${roomId}`), (snapshot) => {
-            const roomData = snapshot.val() || {};
-            const players = roomData.players || {};
-            const scores = roomData.scores || {};
+        // 参加者リストと勝ち数の監視
+        onValue(ref(db, `rooms/kanji-quiz/${roomId}/players`), (snapshot) => {
+            const players = snapshot.val() || {};
             playerCount = Object.keys(players).length;
-            
-            const listHtml = Object.entries(players).map(([pid, name]) => {
-                const win = scores[pid] || 0;
-                return `<span class="player-tag">${name}<span class="win-count">${win}</span></span>`;
+            const listHtml = Object.entries(players).map(([id, p]) => {
+                const winCount = p.wins || 0; // ④勝ち数表示
+                return `<span class="player-tag">${p.name}<span class="win-count">${winCount}</span></span>`;
             }).join('');
             document.getElementById('player-list').innerHTML = listHtml;
         });
@@ -84,6 +82,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
         async function setupNewGame() {
             const word = wordList[Math.floor(Math.random() * wordList.length)];
+            const wordId = Math.random().toString(36).substring(7); // ①リセットバグ修正用ID
             let allStrokes = [];
             for (let i = 0; i < word.length; i++) {
                 const strokes = await getStrokes(word[i], i);
@@ -93,14 +92,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
             await set(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
                 word: word,
+                wordId: wordId,
                 strokes: allStrokes,
                 currentIndex: 0,
                 status: "playing",
                 hostId: myId,
                 lastGuess: { user: "", userId: "", text: "", correct: false },
                 strokeVotes: {},
-                gameVotes: {},
-                gameId: Date.now() // ① 変更を通知
+                gameVotes: {}
             });
         }
 
@@ -108,14 +107,15 @@ window.addEventListener('DOMContentLoaded', () => {
             const data = snapshot.val();
             if (!data) return;
 
-            // ① 文字数に関わらず、新しいゲームIDになったら描画をリセット
-            if (data.gameId !== lastGameId) {
+            isHost = (data.hostId === myId);
+            
+            // ①文字数が同じでもリセットをかける
+            if (currentWordId !== data.wordId) {
+                currentWordId = data.wordId;
                 document.getElementById('kanji-stage').innerHTML = '';
                 lastRenderedIndex = -1;
-                lastGameId = data.gameId;
             }
 
-            isHost = (data.hostId === myId);
             currentWord = data.word || "";
             shuffledStrokes = data.strokes || [];
 
@@ -153,6 +153,19 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (data.lastGuess.correct) {
                     if(nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
                     showResult(data.lastGuess.user);
+                    
+                    // ④ホストが勝利数をカウントアップ（一度だけ実行）
+                    if (isHost && data.status !== "result_counted") {
+                        const winnerId = data.lastGuess.userId;
+                        if (winnerId) {
+                            const winRef = ref(db, `rooms/kanji-quiz/${roomId}/players/${winnerId}/wins`);
+                            onValue(winRef, (snap) => {
+                                const currentWins = snap.val() || 0;
+                                update(ref(db, `rooms/kanji-quiz/${roomId}/players/${winnerId}`), { wins: currentWins + 1 });
+                            }, { onlyOnce: true });
+                        }
+                        update(ref(db, `rooms/kanji-quiz/${roomId}/state`), { status: "result_counted" });
+                    }
                 }
             }
 
@@ -166,19 +179,17 @@ window.addEventListener('DOMContentLoaded', () => {
 
         function updateCanvas(data, showAll = false) {
             const stage = document.getElementById('kanji-stage');
-            // ① 強制クリア条件を gameId に依存させたため、ここは構造維持のみ
-            if (stage.children.length !== currentWord.length) {
-                stage.innerHTML = '';
+            if (stage.children.length === 0) {
                 for (let i = 0; i < currentWord.length; i++) {
                     const box = document.createElement('div');
                     box.className = 'kanji-box';
                     box.innerHTML = `<svg viewBox="0 0 109 109" id="svg-${i}"></svg>`;
                     stage.appendChild(box);
                 }
-                lastRenderedIndex = -1;
             }
 
             const limit = showAll ? shuffledStrokes.length - 1 : data.currentIndex;
+
             for (let i = lastRenderedIndex + 1; i <= limit; i++) {
                 const stroke = shuffledStrokes[i];
                 if (!stroke) continue;
@@ -209,24 +220,16 @@ window.addEventListener('DOMContentLoaded', () => {
             }, 5000);
         }
 
-        document.getElementById('submit-btn').onclick = async () => {
+        document.getElementById('submit-btn').onclick = () => {
             const input = document.getElementById('answer-input');
             const guess = input.value.trim();
             if (!guess) return;
-            const isCorrect = (guess === currentWord);
-            
-            // ④ 正解した場合、勝ち数をインクリメント
-            if (isCorrect) {
-                const scoreRef = ref(db, `rooms/kanji-quiz/${roomId}/scores/${myId}`);
-                const snap = await get(scoreRef);
-                const currentScore = snap.val() || 0;
-                set(scoreRef, currentScore + 1);
-            }
-
             update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
-                lastGuess: { user: myName, userId: myId, text: guess, correct: isCorrect }
+                lastGuess: { user: myName, userId: myId, text: guess, correct: (guess === currentWord) }
             });
             input.value = "";
+            document.getElementById('wait-msg').classList.remove('hidden');
+            setTimeout(() => document.getElementById('wait-msg').classList.add('hidden'), 2000);
         };
 
         document.getElementById('stroke-vote-btn').onclick = () => {

@@ -1,42 +1,37 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <title>漢字遊戯門</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <header>
-        <h1>漢字遊戯門</h1>
-        <p>〜 合言葉を決めて対戦を開始せよ 〜</p>
-    </header>
-
-    <div style="margin-bottom: 30px;">
-        <input type="text" id="room-input" placeholder="合言葉（例：kanji123）">
+<main class="menu">
+    <div class="card" id="btn-quiz">
+        <div class="icon">🔍</div>
+        <h2>漢字当てクイズ</h2>
+        <p>1画ずつ現れる線から熟語を推測せよ</p>
     </div>
 
-    <main class="menu">
-        <div class="card" id="btn-daifugo">
-            <h2>漢字大富豪</h2>
-            <p>画数で攻める出し切りバトル</p>
-        </div>
-        <div class="card" id="btn-poker">
-            <h2>漢字ポーカー</h2>
-            <p>部首を組み合わせて役を作れ</p>
-        </div>
-    </main>
+    <div class="card" id="btn-daifugo">
+        <div class="icon">🎴</div>
+        <h2>漢字大富豪</h2>
+        <p>画数で攻める出し切りバトル</p>
+    </div>
 
-    <script type="module">
-        import { joinRoom } from './js/room-manager.js';
+    <div class="card" id="btn-poker">
+        <div class="icon">🃏</div>
+        <h2>漢字ポーカー</h2>
+        <p>部首を組み合わせて役を作れ</p>
+    </div>
+</main>
 
-        const input = document.getElementById('room-input');
+<script type="module">
+    import { joinRoom } from './js/room-manager.js';
 
-        document.getElementById('btn-daifugo').onclick = () => {
-            joinRoom('daifugo', input.value);
-        };
-        document.getElementById('btn-poker').onclick = () => {
-            joinRoom('poker', input.value);
-        };
-    </script>
-</body>
-</html>
+    const input = document.getElementById('room-input');
+
+    // クイズへのボタンイベントを追加
+    document.getElementById('btn-quiz').onclick = () => {
+        joinRoom('kanji-quiz', input.value);
+    };
+
+    document.getElementById('btn-daifugo').onclick = () => {
+        joinRoom('daifugo', input.value);
+    };
+    document.getElementById('btn-poker').onclick = () => {
+        joinRoom('poker', input.value);
+    };
+</script>

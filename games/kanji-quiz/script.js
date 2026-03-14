@@ -1,29 +1,19 @@
-// 1行目から「get」を削除しました
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 
-// URLからルームIDを取得
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
 
-// IDと名前の管理
 let myId = sessionStorage.getItem('myPlayerId') || Math.random().toString(36).substring(7);
 sessionStorage.setItem('myPlayerId', myId);
 let myName = localStorage.getItem('myKanjiName') || "名無しさん";
 
-// ページ読み込み完了を待ってから実行
 window.addEventListener('DOMContentLoaded', () => {
-    // =========================================================
-    // 1. ロビー画面の処理 (roomIdがない場合)
-    // =========================================================
     if (!roomId) {
+        // --- ロビー処理 ---
         document.getElementById('lobby-ui').classList.remove('hidden');
         document.getElementById('game-ui').classList.add('hidden');
-        
-        // 名前の初期表示
-        const lobbyNameDisp = document.getElementById('lobby-my-name');
-        if(lobbyNameDisp) lobbyNameDisp.innerText = myName;
+        document.getElementById('lobby-my-name').innerText = myName;
 
-        // 名前設定ボタン
         document.getElementById('save-name-btn').onclick = () => {
             const val = document.getElementById('name-input').value.trim();
             if (val) {
@@ -34,44 +24,30 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        // ルーム作成
         document.getElementById('create-room-btn').onclick = async () => {
             const newRoomId = Math.random().toString(36).substring(2, 8);
-            const roomRef = ref(db, `rooms/kanji-quiz/${newRoomId}/state`);
-            
-            try {
-                // ここは set を使うのでエラーになりません
-                await set(roomRef, {
-                    status: "waiting",
-                    hostId: myId,
-                    createdAt: Date.now()
-                });
-                window.location.href = `?room=${newRoomId}`;
-            } catch (e) {
-                console.error("Room creation error:", e);
-                alert("ルーム作成に失敗しました。");
-            }
+            await set(ref(db, `rooms/kanji-quiz/${newRoomId}/state`), {
+                status: "waiting",
+                hostId: myId,
+                createdAt: Date.now()
+            });
+            window.location.href = `?room=${newRoomId}`;
         };
 
-        // ルーム入室
         document.getElementById('join-room-btn').onclick = () => {
             const inputId = document.getElementById('join-room-input').value.trim();
-            if (inputId) {
-                window.location.href = `?room=${inputId}`;
-            } else {
-                alert("ルームIDを入力してください");
-            }
+            if (inputId) window.location.href = `?room=${inputId}`;
         };
     } 
-    // =========================================================
-    // 2. ゲーム画面の処理 (roomIdがある場合)
-    // =========================================================
     else {
+        // --- ゲーム画面処理 ---
         document.getElementById('lobby-ui').classList.add('hidden');
         document.getElementById('game-ui').classList.remove('hidden');
-
         document.getElementById('display-room-id').innerText = roomId;
         document.getElementById('display-my-name').innerText = myName;
+
+        // 参加者として登録
+        set(ref(db, `rooms/kanji-quiz/${roomId}/players/${myId}`), myName);
 
         let isHost = false;
         let currentWord = "";
@@ -79,7 +55,14 @@ window.addEventListener('DOMContentLoaded', () => {
         let lastRenderedIndex = -1;
         let nextStepTimer = null;
 
-        // --- 漢字データの取得 ---
+        // 参加者リストの監視
+        onValue(ref(db, `rooms/kanji-quiz/${roomId}/players`), (snapshot) => {
+            const players = snapshot.val();
+            if (!players) return;
+            const listHtml = Object.values(players).map(name => `<span class="player-tag">${name}</span>`).join('');
+            document.getElementById('player-list').innerHTML = listHtml;
+        });
+
         async function getStrokes(char, charIndex) {
             const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
             const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
@@ -88,10 +71,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 const text = await response.text();
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(text, "image/svg+xml");
-                return Array.from(doc.querySelectorAll('path')).map(p => ({
-                    d: p.getAttribute('d'),
-                    charIndex: charIndex
-                }));
+                return Array.from(doc.querySelectorAll('path')).map(p => ({ d: p.getAttribute('d'), charIndex: charIndex }));
             } catch (e) { return []; }
         }
 
@@ -116,7 +96,6 @@ window.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // --- メイン監視ループ ---
         onValue(ref(db, `rooms/kanji-quiz/${roomId}/state`), (snapshot) => {
             const data = snapshot.val();
             if (!data) return;
@@ -140,17 +119,19 @@ window.addEventListener('DOMContentLoaded', () => {
                 playUi.classList.remove('hidden');
                 resultUi.classList.add('hidden');
                 updateCanvas(data);
+                
+                // 【修正】ホスト側で自動進行タイマーを開始
+                if (isHost && !data.lastGuess.correct) {
+                    manageTimer(data);
+                }
             }
 
             if (data.lastGuess && data.lastGuess.user) {
                 document.getElementById('announcement').innerText = `${data.lastGuess.user}さんの解答: ${data.lastGuess.text}`;
                 if (data.lastGuess.correct) {
+                    if(nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
                     setTimeout(() => showResult(data.lastGuess.user), 1000);
                 }
-            }
-
-            if (isHost && data.status === "playing" && !data.lastGuess.correct) {
-                manageTimer(data);
             }
         });
 
@@ -179,31 +160,38 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // --- 5秒進行タイマー ---
         function manageTimer(data) {
-            const guessedCount = data.playersGuessed ? Object.keys(data.playersGuessed).length : 0;
-            if (!nextStepTimer && guessedCount > 0) {
-                nextStepTimer = setTimeout(() => {
+            if (nextStepTimer) return; // 既にタイマーが動いていれば何もしない
+
+            nextStepTimer = setTimeout(() => {
+                // 画がまだ残っている場合のみ次へ
+                if (data.currentIndex < shuffledStrokes.length - 1) {
                     update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
                         currentIndex: data.currentIndex + 1,
                         playersGuessed: {}
                     });
-                    nextStepTimer = null;
-                    document.getElementById('wait-msg').classList.add('hidden');
-                }, 5000);
-            }
+                }
+                nextStepTimer = null;
+                document.getElementById('wait-msg').classList.add('hidden');
+            }, 5000);
         }
 
+        // 解答送信
         document.getElementById('submit-btn').onclick = () => {
             const input = document.getElementById('answer-input');
             const guess = input.value.trim();
             if (!guess) return;
 
-            update(ref(db, `rooms/kanji-quiz/${roomId}/state/playersGuessed/${myId}`), true);
-            update(ref(db, `rooms/kanji-quiz/${roomId}/state/lastGuess`), {
+            const isCorrect = (guess === currentWord);
+            
+            // 【修正】update ではなく set を使用して確実に書き込む
+            set(ref(db, `rooms/kanji-quiz/${roomId}/state/lastGuess`), {
                 user: myName,
                 text: guess,
-                correct: (guess === currentWord)
+                correct: isCorrect
             });
+            set(ref(db, `rooms/kanji-quiz/${roomId}/state/playersGuessed/${myId}`), true);
             
             input.value = "";
             document.getElementById('wait-msg').classList.remove('hidden');

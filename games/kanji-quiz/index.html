@@ -5,86 +5,73 @@
     <title>漢字当てクイズ - 漢字遊戯門</title>
     <link rel="stylesheet" href="../../style.css">
     <style>
-        #kanji-stage {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin: 20px 0;
-            min-height: 220px;
-        }
-        .kanji-box {
-            width: 150px;
-            height: 150px;
-            background: white;
-            border: 3px solid #8b0000;
-            border-radius: 8px;
-        }
+        #kanji-stage { display: flex; justify-content: center; gap: 10px; margin: 20px 0; min-height: 220px; }
+        .kanji-box { width: 150px; height: 150px; background: white; border: 3px solid #8b0000; border-radius: 8px; }
         svg { width: 100%; height: 100%; }
         path { fill: none; stroke: #333; stroke-width: 3; stroke-linecap: round; }
-        
-        #announcement {
-            height: 30px;
-            color: #8b0000;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
+        #announcement { height: 30px; color: #8b0000; font-weight: bold; margin-bottom: 10px; }
         .hidden { display: none; }
-
-        /* 名前入力エリアのスタイル追記 */
-        #name-setup {
-            background: rgba(139, 0, 0, 0.05);
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border: 1px dashed #8b0000;
-        }
-        #display-my-name {
-            font-weight: bold;
-            color: #8b0000;
-        }
-        #correct-word-display {
-            font-size: 2.5rem;
-            color: #8b0000;
-            margin: 10px 0;
-            letter-spacing: 0.5rem;
-        }
+        #name-setup { background: rgba(139, 0, 0, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px dashed #8b0000; }
+        #display-my-name { font-weight: bold; color: #8b0000; }
+        #correct-word-display { font-size: 2.5rem; color: #8b0000; margin: 10px 0; letter-spacing: 0.5rem; }
+        
+        /* ロビー専用のデザイン */
+        #lobby-ui { text-align: center; margin-top: 20px; }
+        .lobby-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; background: white; border-radius: 8px; }
     </style>
 </head>
 <body>
     <div id="game-container">
         <h1>漢字当てクイズ</h1>
 
-        <div id="name-setup">
-            <input type="text" id="name-input" placeholder="あなたの名前を入力">
-            <button id="save-name-btn">名前を決定</button>
+        <div id="lobby-ui">
+            <div id="name-setup">
+                <p>現在の名前: <span id="lobby-my-name">未設定</span></p>
+                <input type="text" id="name-input" placeholder="あなたの名前を入力">
+                <button id="save-name-btn">名前を決定</button>
+            </div>
+
+            <div class="lobby-section">
+                <h3>自分で部屋を作る</h3>
+                <button id="create-room-btn">新しいルームを作成する</button>
+            </div>
+
+            <div class="lobby-section">
+                <h3>友達の部屋に入る</h3>
+                <input type="text" id="join-room-input" placeholder="ルームIDを入力">
+                <button id="join-room-btn">ルームに入る</button>
+            </div>
+            
+            <button onclick="location.href='../../index.html'">ホームへ戻る</button>
         </div>
 
-        <div id="room-info">
-            ルーム: <span id="display-room-id">-</span> | 
-            名前: <span id="display-my-name">未設定</span>
-        </div>
-        
-        <div id="announcement"></div>
+        <div id="game-ui" class="hidden">
+            <div id="room-info">
+                ルーム: <span id="display-room-id">-</span> | 
+                名前: <span id="display-my-name">未設定</span>
+            </div>
+            
+            <div id="announcement"></div>
+            <div id="kanji-stage"></div>
+            
+            <div id="play-ui" class="hidden">
+                <input type="text" id="answer-input" placeholder="熟語を答えろ！">
+                <button id="submit-btn">解答を送信</button>
+                <p id="wait-msg" class="hidden">全員の解答を待っています（最大5秒）...</p>
+            </div>
 
-        <div id="kanji-stage"></div>
-        
-        <div id="play-ui" class="hidden">
-            <input type="text" id="answer-input" placeholder="熟語を答えろ！">
-            <button id="submit-btn">解答を送信</button>
-            <p id="wait-msg" class="hidden">全員の解答を待っています（最大5秒）...</p>
+            <div id="result-ui" class="hidden">
+                <h2 id="winner-msg"></h2>
+                <p>正解は：</p>
+                <h3 id="correct-word-display"></h3>
+                <button id="next-game-btn">次のゲームへ</button>
+            </div>
+
+            <button id="start-btn" class="hidden">ゲーム開始（ホストのみ）</button>
+            <br><br>
+            <button onclick="location.href='index.html'">ロビーへ退出する</button>
         </div>
 
-        <div id="result-ui" class="hidden">
-            <h2 id="winner-msg"></h2>
-            <p>正解は：</p>
-            <h3 id="correct-word-display"></h3>
-            <button id="next-game-btn">次のゲームへ</button>
-        </div>
-
-        <button id="start-btn" class="hidden">ゲーム開始（ホストのみ）</button>
-        
-        <br>
-        <button onclick="location.href='../../index.html'">ホームへ戻る</button>
     </div>
 
     <script type="module" src="./script.js"></script>

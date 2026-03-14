@@ -1,6 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
-import { getDatabase, ref, set, onValue, push } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js";
-
+import { getDatabase, ref, set, onValue, push, update } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js";
 const firebaseConfig = {
     apiKey: "AIzaSyB_awkpbzCSxtIGt4fKwcfyy2XmImkrv08",
     authDomain: "kanji-64bb5.firebaseapp.com",
@@ -16,4 +15,4 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 // 他のファイル（各ゲーム）で使えるようにエクスポート
-export { db, ref, set, onValue, push };
+export { db, ref, set, onValue, push, update };

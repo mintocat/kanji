@@ -24,7 +24,6 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         document.getElementById('create-room-btn').onclick = async () => {
-            // 【変更】ルームIDを3桁の数字に変更
             const newRoomId = Math.floor(100 + Math.random() * 900).toString();
             await set(ref(db, `rooms/kanji-quiz/${newRoomId}/state`), {
                 status: "waiting",
@@ -116,14 +115,15 @@ window.addEventListener('DOMContentLoaded', () => {
                 startBtn.classList.add('hidden');
                 playUi.classList.remove('hidden');
                 resultUi.classList.add('hidden');
-                updateCanvas(data);
+                
+                // 正解者が出た場合は全画表示、そうでなければ現在の画まで
+                const isCorrect = data.lastGuess?.correct;
+                updateCanvas(data, isCorrect);
 
-                // 画の投票数更新
                 const sVotes = data.strokeVotes ? Object.keys(data.strokeVotes).length : 0;
                 document.getElementById('stroke-vote-count').innerText = `${sVotes}/${playerCount}`;
                 
-                // ホストのみ：5秒経過または全員の投票で次へ
-                if (isHost && !data.lastGuess?.correct) {
+                if (isHost && !isCorrect) {
                     if (sVotes >= playerCount && playerCount > 0) {
                         advanceStroke(data.currentIndex);
                     } else {
@@ -135,21 +135,22 @@ window.addEventListener('DOMContentLoaded', () => {
             if (data.lastGuess && data.lastGuess.user) {
                 document.getElementById('announcement').innerText = `${data.lastGuess.user}：${data.lastGuess.text}`;
                 if (data.lastGuess.correct) {
-                    clearTimeout(nextStepTimer);
-                    nextStepTimer = null;
-                    showResult(data.lastGuess.user, data.gameVotes);
+                    if(nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
+                    showResult(data.lastGuess.user);
                 }
             }
 
-            // 次のゲームへの投票監視
+            // 次のゲーム投票
             const gVotes = data.gameVotes ? Object.keys(data.gameVotes).length : 0;
             document.getElementById('game-vote-count').innerText = `${gVotes}/${playerCount}`;
-            if (isHost && gVotes >= playerCount && playerCount > 0 && data.lastGuess?.correct) {
+            if (isHost && gVotes >= playerCount && playerCount > 0) {
+                // 投票が揃ったらリセットして開始
+                update(ref(db, `rooms/kanji-quiz/${roomId}/state`), { gameVotes: {} });
                 setupNewGame();
             }
         });
 
-        function updateCanvas(data) {
+        function updateCanvas(data, showAll = false) {
             const stage = document.getElementById('kanji-stage');
             if (stage.children.length !== currentWord.length) {
                 stage.innerHTML = '';
@@ -162,24 +163,27 @@ window.addEventListener('DOMContentLoaded', () => {
                 lastRenderedIndex = -1;
             }
 
-            for (let i = lastRenderedIndex + 1; i <= data.currentIndex; i++) {
+            const limit = showAll ? shuffledStrokes.length - 1 : data.currentIndex;
+
+            for (let i = lastRenderedIndex + 1; i <= limit; i++) {
                 const stroke = shuffledStrokes[i];
                 if (!stroke) continue;
                 const svg = document.getElementById(`svg-${stroke.charIndex}`);
                 if(!svg) continue;
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 path.setAttribute("d", stroke.d);
+                // 正解時は赤色にする
+                if (showAll) path.style.stroke = "#ff0000";
                 svg.appendChild(path);
                 lastRenderedIndex = i;
             }
         }
 
-        // 次の画へ進める処理
         function advanceStroke(idx) {
             if (idx < shuffledStrokes.length - 1) {
                 update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
                     currentIndex: idx + 1,
-                    strokeVotes: {} // 投票をリセット
+                    strokeVotes: {} 
                 });
             }
         }
@@ -189,10 +193,8 @@ window.addEventListener('DOMContentLoaded', () => {
             nextStepTimer = setTimeout(() => {
                 nextStepTimer = null;
                 advanceStroke(idx);
-            }, 5000); // 5秒で自動進行
+            }, 5000);
         }
-
-        // --- ボタンイベント ---
 
         document.getElementById('submit-btn').onclick = () => {
             const input = document.getElementById('answer-input');
@@ -206,17 +208,17 @@ window.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => document.getElementById('wait-msg').classList.add('hidden'), 2000);
         };
 
-        // 次の画への投票ボタン
         document.getElementById('stroke-vote-btn').onclick = () => {
-            set(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes/${myId}`), true);
+            // 投票をセット
+            update(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes`), { [myId]: true });
         };
 
-        // 次のゲームへの投票ボタン
         document.getElementById('next-game-btn').onclick = () => {
-            set(ref(db, `rooms/kanji-quiz/${roomId}/state/gameVotes/${myId}`), true);
+            // 次のゲームへの投票
+            update(ref(db, `rooms/kanji-quiz/${roomId}/state/gameVotes`), { [myId]: true });
         };
 
-        function showResult(winner, gameVotes) {
+        function showResult(winner) {
             document.getElementById('play-ui').classList.add('hidden');
             document.getElementById('result-ui').classList.remove('hidden');
             document.getElementById('winner-msg').innerText = `正解！勝者: ${winner}`;

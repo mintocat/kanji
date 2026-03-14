@@ -29,12 +29,40 @@
             margin-bottom: 10px;
         }
         .hidden { display: none; }
+
+        /* 名前入力エリアのスタイル追記 */
+        #name-setup {
+            background: rgba(139, 0, 0, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px dashed #8b0000;
+        }
+        #display-my-name {
+            font-weight: bold;
+            color: #8b0000;
+        }
+        #correct-word-display {
+            font-size: 2.5rem;
+            color: #8b0000;
+            margin: 10px 0;
+            letter-spacing: 0.5rem;
+        }
     </style>
 </head>
 <body>
     <div id="game-container">
         <h1>漢字当てクイズ</h1>
-        <div id="room-info">ルーム: <span id="display-room-id">-</span></div>
+
+        <div id="name-setup">
+            <input type="text" id="name-input" placeholder="あなたの名前を入力">
+            <button id="save-name-btn">名前を決定</button>
+        </div>
+
+        <div id="room-info">
+            ルーム: <span id="display-room-id">-</span> | 
+            名前: <span id="display-my-name">未設定</span>
+        </div>
         
         <div id="announcement"></div>
 
@@ -43,15 +71,20 @@
         <div id="play-ui" class="hidden">
             <input type="text" id="answer-input" placeholder="熟語を答えろ！">
             <button id="submit-btn">解答を送信</button>
-            <p id="wait-msg" class="hidden">他のプレイヤーの解答を待っています...</p>
+            <p id="wait-msg" class="hidden">全員の解答を待っています（最大5秒）...</p>
         </div>
 
         <div id="result-ui" class="hidden">
             <h2 id="winner-msg"></h2>
+            <p>正解は：</p>
+            <h3 id="correct-word-display"></h3>
             <button id="next-game-btn">次のゲームへ</button>
         </div>
 
-        <button id="start-btn">ゲーム開始（ホストのみ）</button>
+        <button id="start-btn" class="hidden">ゲーム開始（ホストのみ）</button>
+        
+        <br>
+        <button onclick="location.href='../../index.html'">ホームへ戻る</button>
     </div>
 
     <script type="module" src="./script.js"></script>

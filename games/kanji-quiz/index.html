@@ -13,13 +13,17 @@
         .hidden { display: none; }
         #name-setup { background: rgba(139, 0, 0, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px dashed #8b0000; }
         #display-my-name { font-weight: bold; color: #8b0000; }
+        
+        /* 正解表示を赤字に変更 */
         #correct-word-display { font-size: 2.5rem; color: #ff0000; margin: 10px 0; letter-spacing: 0.5rem; font-weight: bold; }
+        
         #lobby-ui { text-align: center; margin-top: 20px; }
         .lobby-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; background: white; border-radius: 8px; }
         #player-list-area { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; font-size: 0.9rem; }
         .player-tag { display: inline-block; background: #8b0000; color: white; padding: 2px 8px; border-radius: 15px; margin: 2px; }
-        /* 勝ち数用のバッジ */
-        .win-count { background: #ffd700; color: #000; font-weight: bold; padding: 0 5px; border-radius: 5px; margin-left: 5px; font-size: 0.8rem; }
+        
+        /* 投票中ボタンのスタイル */
+        .voting { background: #ffae00 !important; }
     </style>
 </head>
 <body>
@@ -48,7 +52,6 @@
             <div id="room-info">
                 ルーム: <span id="display-room-id">-</span> | 
                 名前: <span id="display-my-name">未設定</span>
-                <button onclick="location.href='../../index.html'" style="margin-left:10px;">ホームに戻る</button>
             </div>
 
             <div id="player-list-area">
@@ -69,11 +72,18 @@
             <div id="result-ui" class="hidden">
                 <h2 id="winner-msg"></h2>
                 <p>正解は：</p>
-                <h3 id="correct-word-display"></h3>
+                <div id="result-kanji-container" style="display:flex; justify-content:center; gap:10px;"></div>
+                <h3 id="correct-word-display" style="color: #ff0000; font-size: 2rem;"></h3>
                 <button id="next-game-btn">次のゲームへ（投票: <span id="game-vote-count">0</span>）</button>
             </div>
 
             <button id="start-btn" class="hidden">ゲーム開始（ホストのみ）</button>
+            
+            <hr>
+            <div style="margin-top: 10px;">
+                <button onclick="location.href='index.html'">ロビーへ退出する</button>
+                <button onclick="location.href='../../index.html'">ホームへ戻る</button>
+            </div>
         </div>
     </div>
     <script type="module" src="./script.js"></script>

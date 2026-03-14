@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>漢字大富豪 - 漢字遊戯門</title>
+    <link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+    <div id="game-container">
+        <h1>漢字大富豪</h1>
+        <div id="status">接続中...</div>
+        <div id="board"></div>
+        
+        <button onclick="location.href='../../index.html'">ホームへ戻る</button>
+    </div>
+
+    <script type="module">
+        import { initGame } from './script.js';
+        // ゲーム開始
+        initGame();
+    </script>
+</body>
+</html>

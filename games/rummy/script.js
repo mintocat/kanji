@@ -151,6 +151,15 @@ function render(state) {
     if(!state) return;
     const isMyTurn = state.turnOrder && state.turnOrder[state.currentTurnIndex] === myId;
     const phase = state.phase; // "draw" または "action"
+    const canAction = isMyTurn && phase === "action";
+    
+    // 他のボタン
+    document.getElementById('btn-melt').disabled = !canAction || selectedHandIndices.length < 2;
+    document.getElementById('btn-attach').disabled = !canAction || selectedHandIndices.length !== 1 || selectedPublicIndex === -1;
+    
+    // ★「1枚捨てる」ボタンの制御（ここを差し替え）★
+    const discardBtn = document.getElementById('btn-discard');
+    discardBtn.disabled = !(canAction && selectedHandIndices.length === 1);
     
     // ホスト用開始ボタンの表示制御
     const startBtn = document.getElementById('start-btn');

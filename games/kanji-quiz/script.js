@@ -147,13 +147,20 @@ window.addEventListener('DOMContentLoaded', () => {
                 const sVotes = data.strokeVotes ? Object.keys(data.strokeVotes).length : 0;
                 document.getElementById('stroke-vote-count').innerText = `${sVotes}/${playerCount}`;
                 
-                if (isHost && !isCorrect) {
+　　　　　　　　　　　if (isHost && !isCorrect) {
                     if (sVotes >= playerCount && playerCount > 0) {
+                        // 投票が揃ったら、タイマーを止めてから即座に進む
+                        if(nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
                         advanceStroke(data.currentIndex);
                     } else {
                         startStepTimer(data.currentIndex);
                     }
                 }
+                // Firebase側の投票データ(strokeVotes)を確認して、自分がまだ投票していない状態なら
+        // ボタンのロック(votingクラス)を解除する
+        if (!data.strokeVotes || !data.strokeVotes[myId]) {
+            document.getElementById('stroke-vote-btn').classList.remove('voting');
+        }
             }
 
             if (data.lastGuess && data.lastGuess.user) {
@@ -211,6 +218,9 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         function advanceStroke(idx) {
+            // 画を進める前にタイマーをクリア
+            if (nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
+
             if (idx < shuffledStrokes.length - 1) {
                 update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
                     currentIndex: idx + 1,
@@ -250,8 +260,17 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         document.getElementById('stroke-vote-btn').onclick = () => {
-            update(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes`), { [myId]: true });
-        };
+    const btn = document.getElementById('stroke-vote-btn');
+    
+    // もしすでにボタンに 'voting' クラスがついていたら、何もしない（連打防止）
+    if (btn.classList.contains('voting')) return;
+
+    // ボタンに 'voting' クラスをつけて色を変える
+    btn.classList.add('voting');
+    
+    // Firebaseに投票を送信
+    update(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes`), { [myId]: true });
+};
 
         document.getElementById('next-game-btn').onclick = () => {
             update(ref(db, `rooms/kanji-quiz/${roomId}/state/gameVotes`), { [myId]: true });

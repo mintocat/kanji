@@ -1,6 +1,17 @@
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
-// ① 問題を別ファイルからインポート
 import { wordList } from './words.js';
+
+// --- 【追加】効果音の定義 ---
+const sounds = {
+    click: new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'),
+    correct: new Audio('https://assets.mixkit.co/active_storage/sfx/1913/1913-preview.mp3'),
+    wrong: new Audio('https://assets.mixkit.co/active_storage/sfx/2955/2955-preview.mp3'),
+    stroke: new Audio('https://assets.mixkit.co/active_storage/sfx/1487/1487-preview.mp3'),
+    fanfare: new Audio('https://assets.mixkit.co/active_storage/sfx/2018/2018-preview.mp3')
+};
+// 音量の調節
+sounds.stroke.volume = 0.5;
+sounds.click.volume = 0.4;
 
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
@@ -16,6 +27,7 @@ window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('lobby-my-name').innerText = myName;
 
         document.getElementById('save-name-btn').onclick = () => {
+            sounds.click.play(); // 音を追加
             const val = document.getElementById('name-input').value.trim();
             if (val) {
                 myName = val;
@@ -26,6 +38,7 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         document.getElementById('create-room-btn').onclick = async () => {
+            sounds.click.play(); // 音を追加
             const newRoomId = Math.floor(100 + Math.random() * 900).toString();
             await set(ref(db, `rooms/kanji-quiz/${newRoomId}/state`), {
                 status: "waiting",
@@ -36,6 +49,7 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         document.getElementById('join-room-btn').onclick = () => {
+            sounds.click.play(); // 音を追加
             const inputId = document.getElementById('join-room-input').value.trim();
             if (inputId) window.location.href = `?room=${inputId}`;
         };
@@ -135,7 +149,6 @@ window.addEventListener('DOMContentLoaded', () => {
                 playUi.classList.remove('hidden');
                 resultUi.classList.add('hidden');
                 
-                // 単語が変わっていたら内部の管理変数をリセット
                 if (currentWord !== currentWordForReset) {
                     lastRenderedIndex = -1;
                     currentWordForReset = currentWord;
@@ -144,23 +157,22 @@ window.addEventListener('DOMContentLoaded', () => {
                 const isCorrect = data.lastGuess?.correct;
                 updateCanvas(data, isCorrect);
 
+                // 画が進んだときのボタンリセット
+                if (!data.strokeVotes || !data.strokeVotes[myId]) {
+                    document.getElementById('stroke-vote-btn').classList.remove('voting');
+                }
+
                 const sVotes = data.strokeVotes ? Object.keys(data.strokeVotes).length : 0;
                 document.getElementById('stroke-vote-count').innerText = `${sVotes}/${playerCount}`;
                 
-　　　　　　　　　　　if (isHost && !isCorrect) {
+                if (isHost && !isCorrect) {
                     if (sVotes >= playerCount && playerCount > 0) {
-                        // 投票が揃ったら、タイマーを止めてから即座に進む
                         if(nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
                         advanceStroke(data.currentIndex);
                     } else {
                         startStepTimer(data.currentIndex);
                     }
                 }
-                // Firebase側の投票データ(strokeVotes)を確認して、自分がまだ投票していない状態なら
-        // ボタンのロック(votingクラス)を解除する
-        if (!data.strokeVotes || !data.strokeVotes[myId]) {
-            document.getElementById('stroke-vote-btn').classList.remove('voting');
-        }
             }
 
             if (data.lastGuess && data.lastGuess.user) {
@@ -168,6 +180,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (data.lastGuess.correct) {
                     if(nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
                     showResult(data.lastGuess.user);
+                } else {
+                    // 他人の回答で間違っていた場合も音を鳴らすならここ
                 }
             }
 
@@ -179,11 +193,9 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // ★修正ポイント：updateCanvas内の描画リセットロジック
         function updateCanvas(data, showAll = false) {
             const stage = document.getElementById('kanji-stage');
             
-            // 1. 枠の数が違う場合は作り直し
             if (stage.children.length !== currentWord.length) {
                 stage.innerHTML = '';
                 for (let i = 0; i < currentWord.length; i++) {
@@ -194,7 +206,6 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
                 lastRenderedIndex = -1;
             } 
-            // 2. 枠の数が同じでも、新しい単語の開始（lastRenderedIndexが-1）ならSVGの中身を掃除
             else if (lastRenderedIndex === -1) {
                 for (let i = 0; i < currentWord.length; i++) {
                     const svg = document.getElementById(`svg-${i}`);
@@ -203,6 +214,12 @@ window.addEventListener('DOMContentLoaded', () => {
             }
 
             const limit = showAll ? shuffledStrokes.length - 1 : data.currentIndex;
+
+            // 画が新しく描画されるとき
+            if (lastRenderedIndex < limit && !showAll) {
+                sounds.stroke.currentTime = 0;
+                sounds.stroke.play().catch(()=>{}); // 音を追加
+            }
 
             for (let i = lastRenderedIndex + 1; i <= limit; i++) {
                 const stroke = shuffledStrokes[i];
@@ -218,9 +235,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         function advanceStroke(idx) {
-            // 画を進める前にタイマーをクリア
             if (nextStepTimer) { clearTimeout(nextStepTimer); nextStepTimer = null; }
-
             if (idx < shuffledStrokes.length - 1) {
                 update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
                     currentIndex: idx + 1,
@@ -245,10 +260,13 @@ window.addEventListener('DOMContentLoaded', () => {
             const isCorrect = (guess === currentWord);
             
             if (isCorrect) {
+                sounds.correct.play(); // 正解音
                 onValue(ref(db, `rooms/kanji-quiz/${roomId}/scores/${myId}`), (snapshot) => {
                     const currentScore = snapshot.val() || 0;
                     update(ref(db, `rooms/kanji-quiz/${roomId}/scores`), { [myId]: currentScore + 1 });
                 }, { onlyOnce: true });
+            } else {
+                sounds.wrong.play(); // 不正解音
             }
 
             update(ref(db, `rooms/kanji-quiz/${roomId}/state`), {
@@ -260,29 +278,29 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         document.getElementById('stroke-vote-btn').onclick = () => {
-    const btn = document.getElementById('stroke-vote-btn');
-    
-    // もしすでにボタンに 'voting' クラスがついていたら、何もしない（連打防止）
-    if (btn.classList.contains('voting')) return;
-
-    // ボタンに 'voting' クラスをつけて色を変える
-    btn.classList.add('voting');
-    
-    // Firebaseに投票を送信
-    update(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes`), { [myId]: true });
-};
+            const btn = document.getElementById('stroke-vote-btn');
+            if (btn.classList.contains('voting')) return;
+            sounds.click.play(); // クリック音
+            btn.classList.add('voting');
+            update(ref(db, `rooms/kanji-quiz/${roomId}/state/strokeVotes`), { [myId]: true });
+        };
 
         document.getElementById('next-game-btn').onclick = () => {
+            sounds.click.play(); // クリック音
             update(ref(db, `rooms/kanji-quiz/${roomId}/state/gameVotes`), { [myId]: true });
         };
 
         function showResult(winner) {
+            sounds.fanfare.play(); // ファンファーレ
             document.getElementById('play-ui').classList.add('hidden');
             document.getElementById('result-ui').classList.remove('hidden');
             document.getElementById('winner-msg').innerText = `正解！勝者: ${winner}`;
             document.getElementById('correct-word-display').innerText = currentWord;
         }
 
-        document.getElementById('start-btn').onclick = setupNewGame;
+        document.getElementById('start-btn').onclick = () => {
+            sounds.click.play();
+            setupNewGame();
+        };
     }
 });

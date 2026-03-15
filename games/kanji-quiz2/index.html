@@ -12,7 +12,6 @@
         #announcement { height: 30px; color: #8b0000; font-weight: bold; margin-bottom: 10px; text-align: center; }
         .hidden { display: none; }
         #name-setup { background: rgba(139, 0, 0, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px dashed #8b0000; }
-        
         #correct-word-display { font-size: 2.5rem; color: #ff0000; margin: 10px 0; letter-spacing: 0.5rem; font-weight: bold; text-align: center; }
         
         #lobby-ui { text-align: center; margin-top: 20px; }
@@ -20,7 +19,6 @@
         #player-list-area { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; font-size: 0.9rem; text-align: center; }
         .player-tag { display: inline-block; background: #8b0000; color: white; padding: 2px 8px; border-radius: 15px; margin: 2px; }
         
-        /* スコアボード */
         #score-board {
             position: fixed; right: 20px; top: 100px; width: 160px;
             background: white; border: 2px solid #8b0000; border-radius: 8px;
@@ -29,6 +27,15 @@
         #score-board h3 { margin: 0 0 10px 0; font-size: 0.9rem; border-bottom: 1px solid #eee; color: #8b0000; text-align: center; }
         .score-item { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.8rem; border-bottom: 1px dotted #ccc; }
         
+        /* 手札選択中のスタイル */
+        .hand-stroke-btn.selected { 
+            background: #ff0000 !important; 
+            border-color: #ff0000 !important; 
+            transform: scale(1.1); 
+            box-shadow: 0 0 15px rgba(255,0,0,0.5);
+        }
+        .hand-stroke-btn.selected svg path { stroke: white; }
+
         @media (max-width: 800px) {
             #score-board { position: static; width: auto; margin: 10px auto; }
         }
@@ -46,6 +53,11 @@
             </div>
             <div class="lobby-section">
                 <h3>自分で部屋を作る</h3>
+                <div style="margin-bottom: 10px;">
+                    <label style="cursor: pointer; font-weight: bold;">
+                        <input type="checkbox" id="gravity-mode-check"> 重心モード（画を中央に寄せる）
+                    </label>
+                </div>
                 <button id="create-room-btn">新しいルームを作成する</button>
             </div>
             <div class="lobby-section">
@@ -82,7 +94,7 @@
                 
                 <div id="turn-ui" style="margin-top: 15px; border-top: 2px solid #8b0000; padding-top: 15px; background: #fffaf0; border-radius: 8px; padding: 15px;">
                     <h3 id="turn-status" style="margin: 0 0 10px 0; font-size: 1.1rem; text-align: center;"></h3>
-                    <p style="margin: 0 0 10px 0; font-size: 0.8rem; color: #666; text-align: center;">自分の番に画をタップして場に出してください：</p>
+                    <p style="margin: 0 0 10px 0; font-size: 0.8rem; color: #666; text-align: center;">1回クリックで選択、もう1回クリックで場に出す：</p>
                     <div id="my-hand-container" style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;"></div>
                 </div>
                 <p id="wait-msg" class="hidden" style="text-align: center; color: #8b0000;">解答送信済み...</p>

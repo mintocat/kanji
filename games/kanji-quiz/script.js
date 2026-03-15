@@ -54,7 +54,7 @@ window.addEventListener('DOMContentLoaded', () => {
         let lastRenderedIndex = -1;
         let nextStepTimer = null;
         let playerCount = 0;
-        let currentWordForReset = ""; // ③ バグ対策用の内部変数
+        let currentWordForReset = ""; 
 
         onValue(ref(db, `rooms/kanji-quiz/${roomId}/players`), (snapshot) => {
             const players = snapshot.val() || {};
@@ -63,13 +63,11 @@ window.addEventListener('DOMContentLoaded', () => {
             document.getElementById('player-list').innerHTML = listHtml;
         });
 
-        // ② 勝ち回数を監視
         onValue(ref(db, `rooms/kanji-quiz/${roomId}/scores`), (snapshot) => {
             const scores = snapshot.val() || {};
             const scoreListEl = document.getElementById('score-list');
             scoreListEl.innerHTML = "";
             
-            // プレイヤーIDから名前を引くために一旦全プレイヤーを取得
             onValue(ref(db, `rooms/kanji-quiz/${roomId}/players`), (pSnap) => {
                 const players = pSnap.val() || {};
                 Object.entries(scores).forEach(([pId, score]) => {
@@ -95,7 +93,6 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         async function setupNewGame() {
-            // ① 分離したwords.jsのリストを使用
             const word = wordList[Math.floor(Math.random() * wordList.length)];
             let allStrokes = [];
             for (let i = 0; i < word.length; i++) {
@@ -138,10 +135,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 playUi.classList.remove('hidden');
                 resultUi.classList.add('hidden');
                 
-                // ③ バグ修正：単語が変わっていたら強制リセット
+                // 単語が変わっていたら内部の管理変数をリセット
                 if (currentWord !== currentWordForReset) {
-                    const stage = document.getElementById('kanji-stage');
-                    stage.innerHTML = '';
                     lastRenderedIndex = -1;
                     currentWordForReset = currentWord;
                 }
@@ -177,9 +172,11 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // ★修正ポイント：updateCanvas内の描画リセットロジック
         function updateCanvas(data, showAll = false) {
             const stage = document.getElementById('kanji-stage');
-            // ③ バグ修正：文字数の一致だけでなく、現在のHTMLとの整合性をチェック
+            
+            // 1. 枠の数が違う場合は作り直し
             if (stage.children.length !== currentWord.length) {
                 stage.innerHTML = '';
                 for (let i = 0; i < currentWord.length; i++) {
@@ -189,6 +186,13 @@ window.addEventListener('DOMContentLoaded', () => {
                     stage.appendChild(box);
                 }
                 lastRenderedIndex = -1;
+            } 
+            // 2. 枠の数が同じでも、新しい単語の開始（lastRenderedIndexが-1）ならSVGの中身を掃除
+            else if (lastRenderedIndex === -1) {
+                for (let i = 0; i < currentWord.length; i++) {
+                    const svg = document.getElementById(`svg-${i}`);
+                    if (svg) svg.innerHTML = '';
+                }
             }
 
             const limit = showAll ? shuffledStrokes.length - 1 : data.currentIndex;
@@ -230,7 +234,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
             const isCorrect = (guess === currentWord);
             
-            // ② 正解した場合、自分のスコアを加算
             if (isCorrect) {
                 onValue(ref(db, `rooms/kanji-quiz/${roomId}/scores/${myId}`), (snapshot) => {
                     const currentScore = snapshot.val() || 0;

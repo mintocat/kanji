@@ -1,108 +1,86 @@
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
-import { KANJI_LOGIC_DATA } from './kanji_logic.js'; // 外部データをインポート
+// 実際のファイル構成に合わせて kanji_logic.js から判定用のデータをインポートする想定です
+// import { KANJI_LOGIC_DATA } from './kanji_logic.js';
 
-// --- たねリスト (109個) ---
-const SEEDS = "口,木,艹,⺡,日,⺘,⺅,金,一,女,土,火,山,丶,言,丿,糹,⺖,田,大,十,⺮,心,宀,石,亠,貝,禾,又,目,⺼,辶,厶,隹,⺉,力,攵,勹,人,車,疒,寸,米,广,冖,夂,⺨,儿,⻖,酉,頁,彳,几,囗,尸,月,𠂉,厂,子,王,方,匕,白,斤,皿,䒑,灬,止,工,小,廾,夕,衣,𠂇,立,八,刀,匚,戈,巾,士,虍,爫,冂,示,豆,門,耳,羽,兀,㔾,⻗,㐅,欠,丁,⺊,龷,糸,比,⺧,⺌,耂,戊,干,而,丂,户,魚,殳".split(',');
+// --- たねのリストとグループ分け ---
+const group1 = "口,木,艹,⺡,日,⺘,⺅,金,一,女,土,火,山,丶,言,丿,糹,⺖,田,大,十,⺮,心,宀,石,亠,貝".split(",");
+const group2 = "禾,又,目,⺼,辶,厶,隹,⺉,力,攵,勹,人,車,疒,寸,米,广,冖,夂,⺨,儿,⻖,酉,頁,彳,几,囗".split(",");
+const group3 = "尸,月,𠂉,厂,子,王,方,匕,白,斤,皿,䒑,灬,止,工,小,廾,夕,衣,𠂇,立,八,刀,匚,戈,巾,士".split(",");
+const group4 = "虍,爫,冂,示,豆,門,耳,羽,兀,㔾,⻗,㐅,欠,丁,⺊,龷,糸,比,⺧,⺌,耂,戊,干,而,丂,户,魚,殳".split(",");
 
-// 重み付き抽選ロジック
-function drawFromWeightedDeck() {
-    const r = Math.random() * 100;
-    if (r < 30) return SEEDS[Math.floor(Math.random() * 27)];      // 前半27個: 30%
-    if (r < 57) return SEEDS[27 + Math.floor(Math.random() * 27)]; // 次の27個: 27%
-    if (r < 80) return SEEDS[54 + Math.floor(Math.random() * 27)]; // 次の27個: 23%
-    return SEEDS[81 + Math.floor(Math.random() * 28)];             // 残り28個: 20%
-}
+// --- ドローロジック ---
+function drawRandomTane() {
+    const rand = Math.random() * 100; // 0.0 〜 99.999...
+    let targetGroup;
 
-// --- 判定アルゴリズム ---
-
-// メルト判定：選択した「たね」だけで作れる漢字を探す
-function findMeltableKanji(selectedSeeds) {
-    const target = [...selectedSeeds].sort().join(',');
-    const matches = [];
-    
-    for (const [kanji, recipes] of Object.entries(KANJI_LOGIC_DATA)) {
-        for (const recipe of recipes) {
-            if ([...recipe].sort().join(',') === target) {
-                matches.push({ kanji, components: recipe });
-            }
-        }
+    if (rand < 30) {
+        targetGroup = group1; // 30%
+    } else if (rand < 57) {
+        targetGroup = group2; // 27% (30 + 27)
+    } else if (rand < 80) {
+        targetGroup = group3; // 23% (57 + 23)
+    } else {
+        targetGroup = group4; // 20%
     }
-    // 複数ある場合はランダムに1つ返す
-    return matches.length > 0 ? matches[Math.floor(Math.random() * matches.length)] : null;
+
+    // 選ばれたグループからランダムに1つ選んで返す
+    return targetGroup[Math.floor(Math.random() * targetGroup.length)];
 }
 
-// 付ける判定：公開エリアの漢字の構成 + 手札のたね
-function findAttachableKanji(targetItem, addedSeeds) {
-    const combined = [...targetItem.components, ...addedSeeds].sort().join(',');
-    const matches = [];
+// --- ユーザー・ルーム管理 ---
+const urlParams = new URLSearchParams(window.location.search);
+const roomId = urlParams.get('room');
+let myId = sessionStorage.getItem('myPlayerId') || Math.random().toString(36).substring(7);
+sessionStorage.setItem('myPlayerId', myId);
+let myName = localStorage.getItem('myKanjiName') || "名無しさん";
 
-    for (const [kanji, recipes] of Object.entries(KANJI_LOGIC_DATA)) {
-        for (const recipe of recipes) {
-            if ([...recipe].sort().join(',') === combined) {
-                matches.push({ kanji, components: recipe });
+window.addEventListener('DOMContentLoaded', () => {
+    if (!roomId) {
+        // ロビー画面の処理
+        document.getElementById('lobby-ui').classList.remove('hidden');
+        document.getElementById('lobby-my-name').innerText = myName;
+
+        document.getElementById('save-name-btn').onclick = () => {
+            const val = document.getElementById('name-input').value.trim();
+            if (val) {
+                myName = val;
+                localStorage.setItem('myKanjiName', val);
+                document.getElementById('lobby-my-name').innerText = val;
             }
-        }
-    }
-    return matches.length > 0 ? matches[Math.floor(Math.random() * matches.length)] : null;
-}
+        };
 
-// --- ゲームのアクション処理 ---
+        // ルーム作成（設定値をFirebaseに保存）
+        document.getElementById('create-room-btn').onclick = async () => {
+            const newRoomId = Math.floor(100 + Math.random() * 900).toString();
+            const initialHandSize = parseInt(document.getElementById('setting-hand-size').value, 10) || 10;
+            const initialLife = parseInt(document.getElementById('setting-life').value, 10) || 3;
 
-async function handleMelt() {
-    const selectedValues = selectedSeeds.map(idx => gameState.hands[myId][idx]);
-    const result = findMeltableKanji(selectedValues);
+            await set(ref(db, `rooms/kanji-rummy/${newRoomId}/state`), { 
+                status: "waiting", 
+                hostId: myId,
+                settings: {
+                    handSize: initialHandSize,
+                    life: initialLife
+                }
+            });
+            window.location.href = `?room=${newRoomId}`;
+        };
 
-    if (result) {
-        // 成功時の処理
-        const newHand = gameState.hands[myId].filter((_, i) => !selectedSeeds.includes(i));
-        const newPublic = [...(gameState.publicArea || []), result];
+        document.getElementById('join-room-btn').onclick = () => {
+            const inputId = document.getElementById('join-room-input').value.trim();
+            if (inputId) window.location.href = `?room=${inputId}`;
+        };
+    } else {
+        // ゲーム画面（待機）の処理
+        document.getElementById('lobby-ui').classList.add('hidden');
+        document.getElementById('game-ui').classList.remove('hidden');
+        document.getElementById('display-room-id').innerText = roomId;
+
+        // プレイヤー自身の名前を登録
+        set(ref(db, `rooms/kanji-rummy/${roomId}/players/${myId}`), {
+            name: myName
+        });
         
-        await update(ref(db, `rooms/rummy/${roomId}/state`), {
-            [`hands/${myId}`]: newHand,
-            publicArea: newPublic
-        });
-        clearSelection();
-        if (newHand.length === 0) endGame(myId);
-    } else {
-        // 失敗：ライフを減らす
-        applyPenalty();
+        // --- 今後ここにゲーム開始（setupGame）やターン処理を追記していきます ---
     }
-}
-
-async function handleAttach() {
-    if (selectedPublicKanjiIndex === -1) return;
-    
-    const targetItem = gameState.publicArea[selectedPublicKanjiIndex];
-    const addedSeedValues = selectedSeeds.map(idx => gameState.hands[myId][idx]);
-    const result = findAttachableKanji(targetItem, addedSeedValues);
-
-    if (result) {
-        const newHand = gameState.hands[myId].filter((_, i) => !selectedSeeds.includes(i));
-        const newPublic = [...gameState.publicArea];
-        newPublic[selectedPublicKanjiIndex] = result; // 漢字をアップグレード
-
-        await update(ref(db, `rooms/rummy/${roomId}/state`), {
-            [`hands/${myId}`]: newHand,
-            publicArea: newPublic
-        });
-        clearSelection();
-        if (newHand.length === 0) endGame(myId);
-    } else {
-        applyPenalty();
-    }
-}
-
-// ライフ減少処理
-async function applyPenalty() {
-    const currentLife = gameState.lifes[myId];
-    const nextLife = currentLife - 1;
-    
-    await update(ref(db, `rooms/rummy/${roomId}/state/lifes`), { [myId]: nextLife });
-    
-    if (nextLife <= 0) {
-        alert("ライフが尽きました...脱落です。");
-        // 脱落時の処理（手札を捨て札にする、など）
-    } else {
-        alert(`判定失敗！ ライフ残り: ${nextLife}`);
-    }
-}
+});

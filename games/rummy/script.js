@@ -146,12 +146,13 @@ async function setupGame() {
     });
 }
 
-// --- 画面描画 ---
+// --- 画面描画（Bug ②修正 & 案内メッセージの改善） ---
 function render(state) {
     if(!state) return;
     const isMyTurn = state.turnOrder && state.turnOrder[state.currentTurnIndex] === myId;
+    const phase = state.phase; // "draw" または "action"
     
-    // ホスト用開始ボタン
+    // ホスト用開始ボタンの表示制御
     const startBtn = document.getElementById('start-btn');
     if(state.status === "waiting" && state.hostId === myId) {
         startBtn.classList.remove('hidden');
@@ -159,45 +160,61 @@ function render(state) {
         startBtn.classList.add('hidden');
     }
     
-    // プレイヤー状態
+    // プレイヤー状態の更新
     const statusArea = document.getElementById('player-status-area');
     if(state.turnOrder) {
         statusArea.innerHTML = state.turnOrder.map((id, i) => {
             const active = i === state.currentTurnIndex ? 'active-turn' : '';
             const pName = roomPlayers[id]?.name || "待機中...";
-            return `<div class="player-card ${active}">${pName} (HP:${state.lives[id]} / 🎴:${state.hands[id]?.length})</div>`;
+            const life = state.lives ? state.lives[id] : 0;
+            const handCount = state.hands && state.hands[id] ? state.hands[id].length : 0;
+            return `<div class="player-card ${active}">${pName} (HP:${life} / 🎴:${handCount})</div>`;
         }).join('');
     }
 
-    // 捨て札
+    // 捨て札の表示
     const discardPile = state.discardPile || [];
     const topDiscard = discardPile.length > 0 ? discardPile[discardPile.length - 1] : "-";
     document.getElementById('discard-pile').innerText = topDiscard;
 
-    // 公開エリア
+    // 公開エリアの表示
     const pubArea = document.getElementById('public-area');
     pubArea.innerHTML = (state.publicArea || []).map((kanji, i) => 
         `<div class="melted-kanji ${selectedPublicIndex === i ? 'selected' : ''}" onclick="selectPublic(${i})">${kanji}</div>`
     ).join('');
 
-    // 手札
+    // 手札の表示
     const handCont = document.getElementById('my-hand-container');
     const myHand = (state.hands && state.hands[myId]) || [];
     handCont.innerHTML = myHand.map((t, i) => 
         `<div class="tane-card ${selectedHandIndices.includes(i) ? 'selected' : ''}" onclick="selectHand(${i})">${t}</div>`
     ).join('');
 
-    // ボタン制御
-    const phase = state.phase;
-    document.getElementById('btn-melt').disabled = !isMyTurn || phase !== "action" || selectedHandIndices.length < 2;
-    document.getElementById('btn-attach').disabled = !isMyTurn || phase !== "action" || selectedHandIndices.length !== 1 || selectedPublicIndex === -1;
-    document.getElementById('btn-discard').disabled = !isMyTurn || phase !== "action" || selectedHandIndices.length !== 1;
+    // --- ここからがボタンの有効・無効ロジック（修正箇所） ---
+    const canAction = isMyTurn && phase === "action";
     
+    // メルト：2枚以上選択している時
+    document.getElementById('btn-melt').disabled = !canAction || selectedHandIndices.length < 2;
+    
+    // 付ける：1枚選択 ＋ 公開漢字を1つ選択している時
+    document.getElementById('btn-attach').disabled = !canAction || selectedHandIndices.length !== 1 || selectedPublicIndex === -1;
+    
+    // 1枚捨てる：1枚だけ選択している時
+    const discardBtn = document.getElementById('btn-discard');
+    discardBtn.disabled = !canAction || selectedHandIndices.length !== 1;
+    
+    // システムメッセージの更新
     const sysMsg = document.getElementById('system-msg');
     if(isMyTurn) {
-        sysMsg.innerText = phase === "draw" ? "山札か捨て札を引いてください" : "アクションを選ぶか、不要な1枚を捨ててください";
+        if (phase === "draw") {
+            sysMsg.innerText = "山札か捨て札を【1枚引いて】ください。";
+        } else if (selectedHandIndices.length === 0) {
+            sysMsg.innerText = "捨てるカードを【手札から1枚選択】してください。";
+        } else {
+            sysMsg.innerText = "「メルト」「付ける」を選ぶか、「1枚捨てる」で終了してください。";
+        }
     } else {
-        sysMsg.innerText = state.status === "waiting" ? "他の参加者を待っています..." : "相手の番です";
+        sysMsg.innerText = state.status === "waiting" ? "他の参加者が揃うのを待っています..." : "相手が考えています...";
     }
 }
 
@@ -242,9 +259,13 @@ async function handleDiscard() {
 }
 
 function findMeltableKanji(tanes) {
+    const sortedTanes = [...tanes].sort().join(""); // 選択した「たね」を並び替え
     for (const [kanji, combinations] of Object.entries(KANJI_LOGIC_DATA)) {
         for (const combo of combinations) {
-            if (combo.length === tanes.length && combo.every(t => tanes.includes(t))) return kanji;
+            // 要素数と中身が完全に一致するかチェック
+            if (combo.length === tanes.length && [...combo].sort().join("") === sortedTanes) {
+                return kanji;
+            }
         }
     }
     return null;
@@ -270,14 +291,17 @@ async function handleMelt() {
 }
 
 async function handleAttach() {
+    if (selectedHandIndices.length !== 1 || selectedPublicIndex === -1) return;
     const myHand = [...currentGameState.hands[myId]];
     const tane = myHand[selectedHandIndices[0]];
     const baseKanji = currentGameState.publicArea[selectedPublicIndex];
-    
+    const targetPair = [tane, baseKanji].sort().join(""); // 合体させたい2つ
+
     let found = null;
     for (const [kanji, combos] of Object.entries(KANJI_LOGIC_DATA)) {
-        if (combos.some(c => c.includes(tane) && c.includes(baseKanji) && c.length === 2)) {
-            found = kanji; break;
+        if (combos.some(c => c.length === 2 && [...c].sort().join("") === targetPair)) {
+            found = kanji;
+            break;
         }
     }
 
@@ -285,12 +309,8 @@ async function handleAttach() {
         myHand.splice(selectedHandIndices[0], 1);
         const newPublic = [...currentGameState.publicArea];
         newPublic[selectedPublicIndex] = found;
-        await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { 
-            [`hands/${myId}`]: myHand, 
-            publicArea: newPublic 
-        });
-        selectedHandIndices = []; 
-        selectedPublicIndex = -1;
+        await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { [`hands/${myId}`]: myHand, publicArea: newPublic });
+        selectedHandIndices = []; selectedPublicIndex = -1;
         if (myHand.length === 0) alert("上がり！");
     } else {
         reduceLife();

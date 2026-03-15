@@ -112,49 +112,93 @@ window.addEventListener('DOMContentLoaded', () => {
             document.getElementById('player-list').innerHTML = Object.values(roomPlayers).map(name => `<span class="player-tag">${name}</span>`).join('');
         });
 
-        onValue(ref(db, `rooms/kanji-quiz2/${roomId}/scores`), (snapshot) => {
-            const scores = snapshot.val() || {};
-            const list = document.getElementById('score-list');
-            list.innerHTML = Object.entries(scores).map(([pId, s]) => `<div class="score-item"><span>${roomPlayers[pId] || '...'}</span><span>${s}回</span></div>`).sort((a,b) => b.score - a.score).join('');
-        });
+onValue(ref(db, `rooms/kanji-quiz2/${roomId}/scores`), (snapshot) => {
+    const scores = snapshot.val() || {};
+    const list = document.getElementById('score-list');
+    
+    // 配列にしてからスコア順にソートして、それからHTML化する
+    const sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+    
+    list.innerHTML = sortedScores.map(([pId, s]) => {
+        const name = roomPlayers[pId] || '...';
+        return `<div class="score-item"><span>${name}</span><span>${s}回</span></div>`;
+    }).join('');
+});
 
-        async function getStrokes(char, charIndex) {
-            const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
-            const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
-            const resp = await fetch(url);
-            const text = await resp.text();
-            const doc = new DOMParser().parseFromString(text, "image/xml+svg");
-            return Array.from(doc.querySelectorAll('path')).map(p => ({ d: p.getAttribute('d'), charIndex }));
-        }
+
+async function getStrokes(char, charIndex) {
+    const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
+    const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
+    try {
+        const resp = await fetch(url);
+        const text = await resp.text();
+        // ★修正点：xml+svg ではなく svg+xml に修正
+        const doc = new DOMParser().parseFromString(text, "image/svg+xml"); 
+        const paths = Array.from(doc.querySelectorAll('path'));
+        if (paths.length === 0) throw new Error("No paths found");
+        return paths.map(p => ({ d: p.getAttribute('d'), charIndex }));
+    } catch (e) {
+        console.error(`漢字の取得に失敗しました (${char}):`, e);
+        return [];
+    }
+}
 
         async function setupNewGame() {
-            const word = wordList[Math.floor(Math.random() * wordList.length)];
-            let allStrokes = [];
-            for (let i = 0; i < word.length; i++) {
-                const s = await getStrokes(word[i], i);
-                allStrokes = allStrokes.concat(s);
-            }
-            allStrokes.sort(() => Math.random() - 0.5);
+    console.log("ゲームを開始します..."); // デバッグ用
+    if (!wordList || wordList.length === 0) {
+        alert("問題リスト(words.js)が読み込めていません！");
+        return;
+    }
 
-            const pIds = Object.keys(roomPlayers);
-            const turnOrder = [...pIds].sort(() => Math.random() - 0.5);
-            const hands = {};
-            pIds.forEach(id => hands[id] = []);
-            
-            const perPlayer = Math.floor(allStrokes.length / pIds.length);
-            let sIdx = 0;
-            pIds.forEach(id => {
-                for(let i=0; i<perPlayer; i++) hands[id].push(allStrokes[sIdx++]);
-            });
-            const boardStrokes = allStrokes.slice(sIdx);
+    const word = wordList[Math.floor(Math.random() * wordList.length)];
+    let allStrokes = [];
+    for (let i = 0; i < word.length; i++) {
+        const s = await getStrokes(word[i], i);
+        allStrokes = allStrokes.concat(s);
+    }
 
-            await update(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
-                word, allStrokes, boardStrokes, hands, turnOrder,
-                currentTurnIndex: 0, status: "playing", hostId: myId,
-                lastGuess: { user: "", text: "", correct: false }, gameVotes: {}
-            });
-            playSound('start');
+    if (allStrokes.length === 0) {
+        alert("画の取得に失敗しました。もう一度試してください。");
+        return;
+    }
+
+    allStrokes.sort(() => Math.random() - 0.5);
+
+    const pIds = Object.keys(roomPlayers);
+    if (pIds.length === 0) {
+        alert("プレイヤーがいません");
+        return;
+    }
+
+    const turnOrder = [...pIds].sort(() => Math.random() - 0.5);
+    const hands = {};
+    pIds.forEach(id => hands[id] = []);
+    
+    const perPlayer = Math.floor(allStrokes.length / pIds.length);
+    let sIdx = 0;
+    pIds.forEach(id => {
+        for(let i=0; i<perPlayer; i++) {
+            if (allStrokes[sIdx]) hands[id].push(allStrokes[sIdx++]);
         }
+    });
+    const boardStrokes = allStrokes.slice(sIdx);
+
+    // データベースを更新
+    await set(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
+        word, 
+        allStrokes, 
+        boardStrokes, 
+        hands, 
+        turnOrder,
+        currentTurnIndex: 0, 
+        status: "playing", 
+        hostId: myId,
+        gravityMode: currentGameState?.gravityMode || false, // モードを引き継ぐ
+        lastGuess: { user: "", text: "", correct: false }, 
+        gameVotes: {}
+    });
+    playSound('start');
+}
 
         onValue(ref(db, `rooms/kanji-quiz2/${roomId}/state`), (snapshot) => {
             const data = snapshot.val();

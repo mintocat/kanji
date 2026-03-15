@@ -14,6 +14,15 @@ function drawTane() {
     return group[Math.floor(Math.random() * group.length)];
 }
 
+// ★追加：効果音再生ヘルパー
+function playSE(id) {
+    const audio = document.getElementById(id);
+    if (audio) {
+        audio.currentTime = 0;
+        audio.play().catch(() => {}); // ユーザー操作前の再生エラー防止
+    }
+}
+
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
 let myId = sessionStorage.getItem('myPlayerId') || Math.random().toString(36).substring(7);
@@ -27,6 +36,7 @@ let selectedPublicIndex = -1;
 
 // --- HTMLから呼び出せるように window オブジェクトに登録 ---
 window.selectHand = (i) => {
+    playSE('se-select'); // ★音を追加
     if (selectedHandIndices.includes(i)) {
         selectedHandIndices = selectedHandIndices.filter(idx => idx !== i);
     } else {
@@ -36,6 +46,7 @@ window.selectHand = (i) => {
 };
 
 window.selectPublic = (i) => {
+    playSE('se-select'); // ★音を追加
     selectedPublicIndex = (selectedPublicIndex === i) ? -1 : i;
     render(currentGameState);
 };
@@ -96,7 +107,6 @@ function initGame() {
     document.getElementById('game-ui').classList.remove('hidden');
     document.getElementById('display-room-id').innerText = roomId;
 
-    // プレイヤー登録
     set(ref(db, `rooms/kanji-rummy/${roomId}/players/${myId}`), { name: myName });
 
     onValue(ref(db, `rooms/kanji-rummy/${roomId}/players`), s => { 
@@ -111,7 +121,6 @@ function initGame() {
         render(state);
     });
 
-    // 各ボタンイベント（onclickプロパティで登録）
     document.getElementById('start-btn').onclick = setupGame;
     document.getElementById('deck-pile').onclick = () => handleDraw("deck");
     document.getElementById('discard-pile').onclick = () => handleDraw("discard");
@@ -120,10 +129,9 @@ function initGame() {
     document.getElementById('btn-attach').onclick = handleAttach;
 }
 
-// --- ゲーム開始（配牌） ---
 async function setupGame() {
     const pIds = Object.keys(roomPlayers);
-    if(pIds.length < 1) return; // 本番は < 2 に
+    if(pIds.length < 1) return; 
 
     const { hSize, life } = currentGameState.settings;
     const hands = {}; 
@@ -146,22 +154,19 @@ async function setupGame() {
     });
 }
 
-// --- 画面描画（Bug ②修正 & 案内メッセージの改善） ---
 function render(state) {
     if(!state) return;
     const isMyTurn = state.turnOrder && state.turnOrder[state.currentTurnIndex] === myId;
-    const phase = state.phase; // "draw" または "action"
+    const phase = state.phase;
     const canAction = isMyTurn && phase === "action";
     
-    // 他のボタン
+    // ボタンの有効・無効制御
     document.getElementById('btn-melt').disabled = !canAction || selectedHandIndices.length < 2;
     document.getElementById('btn-attach').disabled = !canAction || selectedHandIndices.length !== 1 || selectedPublicIndex === -1;
-    
-    // ★「1枚捨てる」ボタンの制御（ここを差し替え）★
     const discardBtn = document.getElementById('btn-discard');
     discardBtn.disabled = !(canAction && selectedHandIndices.length === 1);
     
-    // ホスト用開始ボタンの表示制御
+    // ホスト用開始ボタン
     const startBtn = document.getElementById('start-btn');
     if(state.status === "waiting" && state.hostId === myId) {
         startBtn.classList.remove('hidden');
@@ -169,7 +174,7 @@ function render(state) {
         startBtn.classList.add('hidden');
     }
     
-    // プレイヤー状態の更新
+    // プレイヤー状態
     const statusArea = document.getElementById('player-status-area');
     if(state.turnOrder) {
         statusArea.innerHTML = state.turnOrder.map((id, i) => {
@@ -181,38 +186,28 @@ function render(state) {
         }).join('');
     }
 
-    // 捨て札の表示
+    // 捨て札
     const discardPile = state.discardPile || [];
     const topDiscard = discardPile.length > 0 ? discardPile[discardPile.length - 1] : "-";
     document.getElementById('discard-pile').innerText = topDiscard;
 
-    // 公開エリアの表示
+    // 公開エリア
     const pubArea = document.getElementById('public-area');
     pubArea.innerHTML = (state.publicArea || []).map((kanji, i) => 
         `<div class="melted-kanji ${selectedPublicIndex === i ? 'selected' : ''}" onclick="selectPublic(${i})">${kanji}</div>`
     ).join('');
 
-    // 手札の表示
+    // 手札の表示（★アニメーション追加）
     const handCont = document.getElementById('my-hand-container');
     const myHand = (state.hands && state.hands[myId]) || [];
-    handCont.innerHTML = myHand.map((t, i) => 
-        `<div class="tane-card ${selectedHandIndices.includes(i) ? 'selected' : ''}" onclick="selectHand(${i})">${t}</div>`
-    ).join('');
+    handCont.innerHTML = myHand.map((t, i) => {
+        const isSelected = selectedHandIndices.includes(i) ? 'selected' : '';
+        // ドロー直後（actionフェーズ）の最後の1枚にアニメーションを付与
+        const isNew = (phase === "action" && i === myHand.length - 1) ? 'anim-draw' : '';
+        return `<div class="tane-card ${isSelected} ${isNew}" onclick="selectHand(${i})">${t}</div>`;
+    }).join('');
 
-    // --- ここからがボタンの有効・無効ロジック（修正箇所） ---
-    const canAction = isMyTurn && phase === "action";
-    
-    // メルト：2枚以上選択している時
-    document.getElementById('btn-melt').disabled = !canAction || selectedHandIndices.length < 2;
-    
-    // 付ける：1枚選択 ＋ 公開漢字を1つ選択している時
-    document.getElementById('btn-attach').disabled = !canAction || selectedHandIndices.length !== 1 || selectedPublicIndex === -1;
-    
-    // 1枚捨てる：1枚だけ選択している時
-    const discardBtn = document.getElementById('btn-discard');
-    discardBtn.disabled = !canAction || selectedHandIndices.length !== 1;
-    
-    // システムメッセージの更新
+    // メッセージ
     const sysMsg = document.getElementById('system-msg');
     if(isMyTurn) {
         if (phase === "draw") {
@@ -227,11 +222,11 @@ function render(state) {
     }
 }
 
-// --- 以下、ロジック部分は変更なし ---
 async function handleDraw(type) {
     if (!currentGameState || currentGameState.phase !== "draw") return;
     if (currentGameState.turnOrder[currentGameState.currentTurnIndex] !== myId) return;
 
+    playSE('se-draw'); // ★音を追加
     let newTane;
     let newDiscard = [...currentGameState.discardPile];
     if (type === "deck") {
@@ -251,6 +246,7 @@ async function handleDraw(type) {
 
 async function handleDiscard() {
     if(selectedHandIndices.length !== 1) return;
+    playSE('se-select'); // ★音を追加
     const idx = selectedHandIndices[0];
     const myHand = [...currentGameState.hands[myId]];
     const discarded = myHand.splice(idx, 1)[0];
@@ -268,10 +264,9 @@ async function handleDiscard() {
 }
 
 function findMeltableKanji(tanes) {
-    const sortedTanes = [...tanes].sort().join(""); // 選択した「たね」を並び替え
+    const sortedTanes = [...tanes].sort().join("");
     for (const [kanji, combinations] of Object.entries(KANJI_LOGIC_DATA)) {
         for (const combo of combinations) {
-            // 要素数と中身が完全に一致するかチェック
             if (combo.length === tanes.length && [...combo].sort().join("") === sortedTanes) {
                 return kanji;
             }
@@ -286,6 +281,7 @@ async function handleMelt() {
     const foundKanji = findMeltableKanji(selectedTanes);
 
     if (foundKanji) {
+        playSE('se-melt'); // ★成功音
         selectedHandIndices.sort((a,b) => b-a).forEach(i => myHand.splice(i, 1));
         const newPublic = [...(currentGameState.publicArea || []), foundKanji];
         await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { 
@@ -304,7 +300,7 @@ async function handleAttach() {
     const myHand = [...currentGameState.hands[myId]];
     const tane = myHand[selectedHandIndices[0]];
     const baseKanji = currentGameState.publicArea[selectedPublicIndex];
-    const targetPair = [tane, baseKanji].sort().join(""); // 合体させたい2つ
+    const targetPair = [tane, baseKanji].sort().join("");
 
     let found = null;
     for (const [kanji, combos] of Object.entries(KANJI_LOGIC_DATA)) {
@@ -315,6 +311,7 @@ async function handleAttach() {
     }
 
     if (found) {
+        playSE('se-melt'); // ★成功音
         myHand.splice(selectedHandIndices[0], 1);
         const newPublic = [...currentGameState.publicArea];
         newPublic[selectedPublicIndex] = found;
@@ -327,6 +324,13 @@ async function handleAttach() {
 }
 
 async function reduceLife() {
+    playSE('se-error'); // ★エラー音
+    
+    // ★アニメーション：画面を揺らす
+    const ui = document.getElementById('game-ui');
+    ui.classList.add('anim-shake');
+    setTimeout(() => ui.classList.remove('anim-shake'), 300);
+
     const newLife = currentGameState.lives[myId] - 1;
     alert("合体失敗！ライフ減少！");
     await update(ref(db, `rooms/kanji-rummy/${roomId}/state/lives`), { [myId]: newLife });

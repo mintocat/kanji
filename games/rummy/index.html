@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>漢字ラミー - 漢字遊戯門</title>
+    <style>
+        body { font-family: 'Hiragino Mincho ProN', 'serif'; background: #f4f4f4; margin: 0; padding: 20px; color: #333; }
+        #game-container { max-width: 900px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 2px solid #8b0000; }
+        h1 { text-align: center; color: #8b0000; border-bottom: 2px double #8b0000; padding-bottom: 10px; }
+        
+        /* エリア設定 */
+        .section { margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; }
+        .area-title { font-weight: bold; font-size: 0.9rem; color: #8b0000; margin-bottom: 8px; }
+        
+        /* 場の公開エリア */
+        #meld-board { min-height: 80px; display: flex; gap: 15px; flex-wrap: wrap; background: #fffaf0; }
+        .meld-item { background: white; border: 2px solid #8b0000; padding: 10px; font-size: 2rem; border-radius: 8px; position: relative; }
+        .meld-tane { font-size: 0.6rem; color: #666; display: block; text-align: center; }
+
+        /* 山札と捨て札 */
+        #center-pile { display: flex; justify-content: center; gap: 50px; margin: 20px 0; }
+        .card-pile { width: 80px; height: 110px; border-radius: 8px; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; cursor: pointer; transition: 0.2s; position: relative; }
+        #deck { background: #8b0000; color: white; }
+        #discard-pile { background: white; border-style: dashed; }
+        .pile-label { position: absolute; top: -20px; font-size: 0.8rem; color: #333; width: 100%; text-align: center; }
+
+        /* 手札 */
+        #player-hand { display: flex; gap: 8px; justify-content: center; min-height: 60px; margin: 20px 0; }
+        .tane-card { width: 45px; height: 65px; background: white; border: 2px solid #8b0000; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; }
+        .tane-card.selected { background: #ffcccc; transform: translateY(-10px); }
+
+        /* 操作パネル */
+        #action-panel { text-align: center; }
+        input[type="text"] { padding: 8px; border: 2px solid #8b0000; border-radius: 4px; font-size: 1rem; width: 120px; }
+        button { padding: 8px 15px; background: #8b0000; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:disabled { background: #ccc; }
+
+        #msg-log { font-size: 0.9rem; height: 40px; text-align: center; color: #d2691e; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <h1>漢字ラミー</h1>
+    <div id="msg-log">対戦相手を待っています...</div>
+
+    <div class="section">
+        <div class="area-title">公開エリア (メルト)</div>
+        <div id="meld-board"></div>
+    </div>
+
+    <div id="center-pile">
+        <div id="deck" class="card-pile">
+            <span class="pile-label">山札</span>
+            漢
+        </div>
+        <div id="discard-pile" class="card-pile">
+            <span class="pile-label">捨て札</span>
+            <span id="discard-top">-</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="area-title">あなたの手札 (<span id="hand-count">0</span>枚)</div>
+        <div id="player-hand"></div>
+    </div>
+
+    <div id="action-panel">
+        <input type="text" id="kanji-input" placeholder="漢字を入力">
+        <button id="meld-btn" disabled>メルト / 付け足し</button>
+        <button id="discard-btn" disabled>選んだ1枚を捨てる</button>
+    </div>
+    
+    <div style="margin-top: 20px; font-size: 0.8rem; color: #666;">
+        【ルール】1. 山札か捨て札を引く。 2. 漢字を作ってメルト。 3. 不要な1枚を捨ててターン終了。
+    </div>
+</div>
+
+<script>
+// --- 漢字分解データベース (スターターパック) ---
+// 複雑な漢字も、最小の「たね」に分解する定義
+const KANJI_DB = {
+    '枝': ['木', '十', '又'],
+    '建': ['廴', '聿'],
+    '健': ['亻', '廴', '聿'], // 建を分解したもの
+    '明': ['日', '月'],
+    '休': ['亻', '木'],
+    '体': ['亻', '本'],
+    '森': ['木', '木', '木'],
+    '林': ['木', '木'],
+    '漢': ['氵', '廿', '夫'],
+    '草': ['艹', '日', '十'],
+    '花': ['艹', '亻', '匕'],
+    '語': ['言', '五', '口'],
+    '信': ['亻', '言'],
+    '和': ['禾', '口']
+};
+
+// 山札に含まれる「たね」のリスト
+const TANE_SET = ['木','十','又','亻','廴','聿','日','月','本','氵','廿','夫','艹','匕','言','五','口','禾'];
+
+// --- ゲーム状態 ---
+let deck = [];
+let discardPile = ['木'];
+let playerHand = [];
+let aiHand = [];
+let melds = []; // 場のメルト {kanji: '枝', parts: ['木','十','又']}
+let turn = 'player'; // 'player' or 'ai'
+let phase = 'draw'; // 'draw' or 'action'
+let selectedHandIndex = -1;
+
+// --- 初期化 ---
+function initGame() {
+    // デッキ作成 (ランダム)
+    deck = [];
+    for(let i=0; i<100; i++) {
+        deck.push(TANE_SET[Math.floor(Math.random() * TANE_SET.length)]);
+    }
+    // 配布
+    for(let i=0; i<10; i++) {
+        playerHand.push(drawFromDeck(playerHand, false));
+        aiHand.push(drawFromDeck(aiHand, false));
+    }
+    updateUI();
+    log("あなたの番です。山札か捨て札を引いてください。");
+}
+
+// --- ロジック ---
+
+// ドロー支援：手札を見て「あと1枚」で完成するパーツを優先的に出す
+function drawFromDeck(currentHand, isPlayer = true) {
+    if (deck.length === 0) return TANE_SET[0];
+
+    // 支援ロジック: 現在の手札で作れそうな漢字を探す
+    let candidates = [];
+    for (let kanji in KANJI_DB) {
+        let parts = KANJI_DB[kanji];
+        let matchCount = 0;
+        let missingParts = [...parts];
+
+        currentHand.forEach(h => {
+            let idx = missingParts.indexOf(h);
+            if (idx > -1) {
+                matchCount++;
+                missingParts.splice(idx, 1);
+            }
+        });
+
+        // あと1枚で完成するなら、そのパーツを候補に入れる
+        if (missingParts.length === 1) {
+            candidates.push(missingParts[0]);
+        }
+    }
+
+    // 確率で支援牌を出す（30%の確率で「引き寄せ」発生）
+    if (candidates.length > 0 && Math.random() < 0.3) {
+        let picked = candidates[Math.floor(Math.random() * candidates.length)];
+        // 本来のデッキからそのパーツを探して抜く（なければランダム）
+        let deckIdx = deck.indexOf(picked);
+        if (deckIdx > -1) return deck.splice(deckIdx, 1)[0];
+    }
+
+    return deck.pop();
+}
+
+function updateUI() {
+    // 手札表示
+    const handEl = document.getElementById('player-hand');
+    handEl.innerHTML = '';
+    playerHand.forEach((t, i) => {
+        const d = document.createElement('div');
+        d.className = `tane-card ${selectedHandIndex === i ? 'selected' : ''}`;
+        d.innerText = t;
+        d.onclick = () => {
+            if (phase === 'action' || phase === 'draw') {
+                selectedHandIndex = i;
+                updateUI();
+            }
+        };
+        handEl.appendChild(d);
+    });
+
+    document.getElementById('hand-count').innerText = playerHand.length;
+    document.getElementById('discard-top').innerText = discardPile[discardPile.length - 1] || '-';
+    
+    // メルトエリア表示
+    const boardEl = document.getElementById('meld-board');
+    boardEl.innerHTML = '';
+    melds.forEach(m => {
+        const div = document.createElement('div');
+        div.className = 'meld-item';
+        div.innerHTML = `${m.kanji}<span class="meld-tane">${m.parts.join('')}</span>`;
+        boardEl.appendChild(div);
+    });
+
+    // ボタン状態
+    document.getElementById('meld-btn').disabled = (phase !== 'action');
+    document.getElementById('discard-btn').disabled = (phase !== 'action' || selectedHandIndex === -1);
+}
+
+// --- アクション ---
+
+// ドロー
+document.getElementById('deck').onclick = () => {
+    if (turn !== 'player' || phase !== 'draw') return;
+    playerHand.push(drawFromDeck(playerHand, true));
+    phase = 'action';
+    log("手札を整理して、メルトするか不要な牌を捨ててください。");
+    updateUI();
+};
+
+document.getElementById('discard-pile').onclick = () => {
+    if (turn !== 'player' || phase !== 'draw') return;
+    playerHand.push(discardPile.pop());
+    phase = 'action';
+    updateUI();
+};
+
+// メルト・付け足し
+document.getElementById('meld-btn').onclick = () => {
+    const input = document.getElementById('kanji-input').value.trim();
+    if (!KANJI_DB[input]) {
+        alert("その漢字は辞書にないか、作れません！");
+        return;
+    }
+
+    const required = [...KANJI_DB[input]];
+    
+    // 1. 新規メルトチェック
+    let tempHand = [...playerHand];
+    let canMelt = true;
+    required.forEach(p => {
+        let idx = tempHand.indexOf(p);
+        if (idx > -1) tempHand.splice(idx, 1);
+        else canMelt = false;
+    });
+
+    if (canMelt) {
+        playerHand = tempHand;
+        melds.push({ kanji: input, parts: KANJI_DB[input] });
+        log(`${input} をメルトしました！`);
+        checkWin('あなた');
+    } else {
+        // 2. 付け足しチェック (場にある漢字 + 手札)
+        let foundAdd = false;
+        melds.forEach((m, mIdx) => {
+            // ターゲットの漢字(input)をバラしたパーツ集合が、
+            // 「場の漢字(m.kanji)をバラしたパーツ」＋「手札の一部」で構成できるか？
+            let neededFromHand = [...required];
+            m.parts.forEach(p => {
+                let idx = neededFromHand.indexOf(p);
+                if (idx > -1) neededFromHand.splice(idx, 1);
+            });
+
+            // 手札にあるか確認
+            let tempHand2 = [...playerHand];
+            let canAdd = true;
+            neededFromHand.forEach(p => {
+                let idx = tempHand2.indexOf(p);
+                if (idx > -1) tempHand2.splice(idx, 1);
+                else canAdd = false;
+            });
+
+            if (canAdd && neededFromHand.length > 0) {
+                playerHand = tempHand2;
+                melds[mIdx] = { kanji: input, parts: KANJI_DB[input] };
+                log(`${m.kanji} に付け足して ${input} にしました！`);
+                foundAdd = true;
+                checkWin('あなた');
+            }
+        });
+        if (!foundAdd) alert("手札が足りないか、合体できません。");
+    }
+    
+    document.getElementById('kanji-input').value = '';
+    updateUI();
+};
+
+// 捨て札
+document.getElementById('discard-btn').onclick = () => {
+    if (selectedHandIndex === -1) return;
+    discardPile.push(playerHand.splice(selectedHandIndex, 1)[0]);
+    selectedHandIndex = -1;
+    phase = 'draw';
+    turn = 'ai';
+    updateUI();
+    setTimeout(aiTurn, 1000);
+};
+
+// --- AIのターン (簡易) ---
+function aiTurn() {
+    log("AIが思考中...");
+    // 山札から引く
+    aiHand.push(drawFromDeck(aiHand, false));
+    
+    // メルトできるか試行
+    for (let kanji in KANJI_DB) {
+        let required = [...KANJI_DB[kanji]];
+        let tempHand = [...aiHand];
+        let canMelt = true;
+        required.forEach(p => {
+            let idx = tempHand.indexOf(p);
+            if (idx > -1) tempHand.splice(idx, 1);
+            else canMelt = false;
+        });
+        if (canMelt) {
+            aiHand = tempHand;
+            melds.push({ kanji: kanji, parts: KANJI_DB[kanji] });
+            log(`AIが ${kanji} をメルトしました！`);
+            if(checkWin('AI')) return;
+        }
+    }
+
+    // 適当に1枚捨てる
+    discardPile.push(aiHand.pop());
+    turn = 'player';
+    log("あなたの番です。");
+    updateUI();
+}
+
+function checkWin(name) {
+    if (playerHand.length === 0 || aiHand.length === 0) {
+        alert(`${name} の勝ちです！！`);
+        location.reload();
+        return true;
+    }
+    return false;
+}
+
+function log(msg) { document.getElementById('msg-log').innerText = msg; }
+
+initGame();
+</script>
+</body>
+</html>

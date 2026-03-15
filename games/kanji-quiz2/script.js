@@ -56,6 +56,13 @@ style.textContent = `
     .hand-stroke-btn { background: white; border: 2px solid #8b0000; border-radius: 4px; cursor: pointer; padding: 2px; transition: 0.2s; width: 60px; height: 60px; }
     .hand-stroke-btn:disabled { border-color: #ccc; cursor: not-allowed; opacity: 0.3; filter: grayscale(1); }
     .hand-stroke-btn:hover:not(:disabled) { background: #ffe4e1; transform: scale(1.1); box-shadow: 0 0 10px rgba(139,0,0,0.3); }
+    
+    .hand-stroke-btn.selected { 
+        background: #ffcccc !important; 
+        border-color: #ff8888 !important; 
+        transform: scale(1.1); 
+        box-shadow: 0 0 15px rgba(255, 100, 100, 0.4);
+    }
 `;
 document.head.appendChild(style);
 
@@ -294,71 +301,82 @@ async function getStrokes(char, charIndex) {
             return `translate(${dx}, ${dy})`;
         }
 
-        function renderHand(data) {
-            const container = document.getElementById('my-hand-container');
-            container.innerHTML = '';
-            const myHand = data.hands?.[myId] || [];
-            const isMyTurn = data.turnOrder?.[data.currentTurnIndex] === myId;
-            const statusEl = document.getElementById('turn-status');
+function renderHand(data) {
+    const container = document.getElementById('my-hand-container');
+    container.innerHTML = '';
+    const myHand = data.hands?.[myId] || [];
+    const isMyTurn = data.turnOrder?.[data.currentTurnIndex] === myId;
+    const statusEl = document.getElementById('turn-status');
 
-            if (isMyTurn) {
-                statusEl.innerText = "★ あなたの番です！ ★";
-                statusEl.style.color = "#8b0000";
-            } else {
-                const curName = roomPlayers[data.turnOrder?.[data.currentTurnIndex]] || "誰か";
-                statusEl.innerText = `${curName} の番です...`;
-                statusEl.style.color = "#666";
-            }
+    if (isMyTurn) {
+        statusEl.innerText = "★ あなたの番です！ ★";
+        statusEl.style.color = "#8b0000";
+    } else {
+        const curName = roomPlayers[data.turnOrder?.[data.currentTurnIndex]] || "誰か";
+        statusEl.innerText = `${curName} の番です...`;
+        statusEl.style.color = "#666";
+    }
 
-            myHand.forEach((s, i) => {
-                const btn = document.createElement('button');
-                btn.className = `hand-stroke-btn ${selectedStrokeIndex === i ? 'selected' : ''}`;
-                btn.disabled = !isMyTurn;
-                
-                const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                svg.setAttribute("viewBox", "0 0 109 109");
-                const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                p.setAttribute("d", s.d);
-                p.setAttribute("stroke", "#333");
-                p.setAttribute("stroke-width", "4");
-                p.setAttribute("fill", "none");
+    myHand.forEach((s, i) => {
+        const btn = document.createElement('button');
+        // 選択されているインデックスなら .selected クラスを付与
+        btn.className = `hand-stroke-btn ${selectedStrokeIndex === i ? 'selected' : ''}`;
+        btn.disabled = !isMyTurn;
+        
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 109 109");
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.setAttribute("d", s.d);
+        p.setAttribute("stroke", "#333");
+        p.setAttribute("stroke-width", "4");
+        p.setAttribute("fill", "none");
 
-                // 重心モードがONならパーツを中央に寄せる
-                if (data.gravityMode) {
-                    p.setAttribute("transform", getGravityTransform(s.d));
-                }
-
-                svg.appendChild(p);
-                btn.appendChild(svg);
-
-                btn.onclick = () => {
-                    if (!isMyTurn) return;
-                    if (selectedStrokeIndex === i) {
-                        // 2回目のクリック：場に出す
-                        confirmPlayStroke(i);
-                        selectedStrokeIndex = -1;
-                    } else {
-                        // 1回目のクリック：選択する
-                        selectedStrokeIndex = i;
-                        renderHand(data);
-                    }
-                };
-                container.appendChild(btn);
-            });
+        if (data.gravityMode) {
+            p.setAttribute("transform", getGravityTransform(s.d));
         }
 
-        function confirmPlayStroke(i) {
-            const myHand = [...currentGameState.hands[myId]];
-            const played = myHand.splice(i, 1)[0];
-            const newBoard = [...currentGameState.boardStrokes, played];
-            const nextIdx = (currentGameState.currentTurnIndex + 1) % currentGameState.turnOrder.length;
+        svg.appendChild(p);
+        btn.appendChild(svg);
+
+        btn.onclick = () => {
+            if (!isMyTurn) return;
             
-            update(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
-                [`hands/${myId}`]: myHand,
-                boardStrokes: newBoard,
-                currentTurnIndex: nextIdx
-            });
-        }
+            if (selectedStrokeIndex === i) {
+                // 2回目のクリック：確定
+                confirmPlayStroke(i);
+                selectedStrokeIndex = -1; // 選択解除
+            } else {
+                // 1回目のクリック：選択
+                selectedStrokeIndex = i;
+                renderHand(data); // 再描画して見た目を更新
+            }
+        };
+        container.appendChild(btn);
+    });
+}
+
+function confirmPlayStroke(i) {
+    if (!currentGameState) return;
+
+    // 現在の手札を取得（念のため空配列を担保）
+    const myHand = [...(currentGameState.hands?.[myId] || [])];
+    if (myHand.length === 0) return;
+
+    // 選択された画を取り出す
+    const played = myHand.splice(i, 1)[0];
+
+    // ★修正箇所：boardStrokesが undefined でもエラーにならないように [ ] を用意
+    const currentBoard = currentGameState.boardStrokes || [];
+    const newBoard = [...currentBoard, played];
+
+    const nextIdx = (currentGameState.currentTurnIndex + 1) % currentGameState.turnOrder.length;
+    
+    update(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
+        [`hands/${myId}`]: myHand,
+        boardStrokes: newBoard,
+        currentTurnIndex: nextIdx
+    });
+}
 
         document.getElementById('submit-btn').onclick = () => {
             const input = document.getElementById('answer-input');

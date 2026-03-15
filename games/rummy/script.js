@@ -1,6 +1,81 @@
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 import { KANJI_LOGIC_DATA } from './kanji_logic.js';
 
+// --- 音声生成エンジン（Web Audio API） ---
+const AudioEngine = {
+    ctx: null,
+    init() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    },
+    // 選択音：コンという短い木の音
+    playSelect() {
+        this.init();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.1);
+    },
+    // ドロー音：シュッという風切り音
+    playDraw() {
+        this.init();
+        const bufferSize = this.ctx.sampleRate * 0.1;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(1000, this.ctx.currentTime);
+        filter.frequency.exponentialRampToValueAtTime(3000, this.ctx.currentTime + 0.1);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start();
+    },
+    // 成功音：カキーンという高い音
+    playSuccess() {
+        this.init();
+        [1200, 1500, 1800].forEach((freq, i) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime + i*0.05);
+            gain.gain.setValueAtTime(0.1, this.ctx.currentTime + i*0.05);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(this.ctx.currentTime + i*0.05);
+            osc.stop(this.ctx.currentTime + 0.4);
+        });
+    },
+    // 失敗音：ブブーという低い濁った音
+    playError() {
+        this.init();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(100, this.ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.3);
+    }
+};
+
 // --- たねリスト定義 ---
 const g1 = "口,木,艹,⺡,日,⺘,⺅,金,一,女,土,火,山,丶,言,丿,糹,⺖,田,大,十,⺮,心,宀,石,亠,貝".split(",");
 const g2 = "禾,又,目,⺼,辶,厶,隹,⺉,力,攵,勹,人,車,疒,寸,米,广,冖,夂,⺨,儿,⻖,酉,頁,彳,几,囗".split(",");
@@ -14,15 +89,6 @@ function drawTane() {
     return group[Math.floor(Math.random() * group.length)];
 }
 
-// ★追加：効果音再生ヘルパー
-function playSE(id) {
-    const audio = document.getElementById(id);
-    if (audio) {
-        audio.currentTime = 0;
-        audio.play().catch(() => {}); // ユーザー操作前の再生エラー防止
-    }
-}
-
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
 let myId = sessionStorage.getItem('myPlayerId') || Math.random().toString(36).substring(7);
@@ -33,10 +99,11 @@ let currentGameState = null;
 let roomPlayers = {};
 let selectedHandIndices = []; 
 let selectedPublicIndex = -1; 
+let lastPublicLength = 0; // アニメーション判定用
 
-// --- HTMLから呼び出せるように window オブジェクトに登録 ---
+// --- 操作系 ---
 window.selectHand = (i) => {
-    playSE('se-select'); // ★音を追加
+    AudioEngine.playSelect();
     if (selectedHandIndices.includes(i)) {
         selectedHandIndices = selectedHandIndices.filter(idx => idx !== i);
     } else {
@@ -46,57 +113,31 @@ window.selectHand = (i) => {
 };
 
 window.selectPublic = (i) => {
-    playSE('se-select'); // ★音を追加
+    AudioEngine.playSelect();
     selectedPublicIndex = (selectedPublicIndex === i) ? -1 : i;
     render(currentGameState);
 };
 
 // --- 初期化 ---
 window.addEventListener('DOMContentLoaded', () => {
-    if (!roomId) {
-        initLobby();
-    } else {
-        initGame();
-    }
+    if (!roomId) initLobby(); else initGame();
 });
 
 function initLobby() {
     const nameDisplay = document.getElementById('lobby-my-name');
-    const saveNameBtn = document.getElementById('save-name-btn');
-    const createRoomBtn = document.getElementById('create-room-btn');
-    const joinRoomBtn = document.getElementById('join-room-btn');
-
     nameDisplay.innerText = myName;
-
-    saveNameBtn.onclick = () => {
+    document.getElementById('save-name-btn').onclick = () => {
         const v = document.getElementById('name-input').value.trim();
-        if(v) { 
-            myName = v; 
-            localStorage.setItem('myKanjiName', v); 
-            nameDisplay.innerText = v;
-            alert("名前を保存しました: " + v);
-        }
+        if(v) { myName = v; localStorage.setItem('myKanjiName', v); nameDisplay.innerText = v; alert("保存完了"); }
     };
-
-    createRoomBtn.onclick = async () => {
+    document.getElementById('create-room-btn').onclick = async () => {
         const id = Math.floor(100 + Math.random() * 900).toString();
         const hSize = parseInt(document.getElementById('setting-hand-size').value) || 10;
         const life = parseInt(document.getElementById('setting-life').value) || 3;
-        
-        console.log("ルーム作成中...", id);
-        try {
-            await set(ref(db, `rooms/kanji-rummy/${id}/state`), { 
-                status:"waiting", 
-                hostId:myId, 
-                settings:{hSize, life} 
-            });
-            window.location.href = `?room=${id}`;
-        } catch (e) {
-            console.error("ルーム作成エラー:", e);
-        }
+        await set(ref(db, `rooms/kanji-rummy/${id}/state`), { status:"waiting", hostId:myId, settings:{hSize, life} });
+        window.location.href = `?room=${id}`;
     };
-
-    joinRoomBtn.onclick = () => {
+    document.getElementById('join-room-btn').onclick = () => {
         const id = document.getElementById('join-room-input').value.trim();
         if(id) window.location.href = `?room=${id}`;
     };
@@ -106,21 +147,20 @@ function initGame() {
     document.getElementById('lobby-ui').classList.add('hidden');
     document.getElementById('game-ui').classList.remove('hidden');
     document.getElementById('display-room-id').innerText = roomId;
-
     set(ref(db, `rooms/kanji-rummy/${roomId}/players/${myId}`), { name: myName });
-
-    onValue(ref(db, `rooms/kanji-rummy/${roomId}/players`), s => { 
-        roomPlayers = s.val() || {}; 
-        if(currentGameState) render(currentGameState);
-    });
-
+    onValue(ref(db, `rooms/kanji-rummy/${roomId}/players`), s => { roomPlayers = s.val() || {}; if(currentGameState) render(currentGameState); });
     onValue(ref(db, `rooms/kanji-rummy/${roomId}/state`), s => {
         const state = s.val();
         if(!state) return;
+        
+        // 漢字が増えたら成功演出
+        if (currentGameState && state.publicArea && state.publicArea.length > (currentGameState.publicArea?.length || 0)) {
+            AudioEngine.playSuccess();
+        }
+        
         currentGameState = state;
         render(state);
     });
-
     document.getElementById('start-btn').onclick = setupGame;
     document.getElementById('deck-pile').onclick = () => handleDraw("deck");
     document.getElementById('discard-pile').onclick = () => handleDraw("discard");
@@ -131,26 +171,12 @@ function initGame() {
 
 async function setupGame() {
     const pIds = Object.keys(roomPlayers);
-    if(pIds.length < 1) return; 
-
     const { hSize, life } = currentGameState.settings;
-    const hands = {}; 
-    const lives = {};
-    
-    pIds.forEach(id => {
-        hands[id] = Array.from({length:hSize}, () => drawTane());
-        lives[id] = life;
-    });
-
+    const hands = {}; const lives = {};
+    pIds.forEach(id => { hands[id] = Array.from({length:hSize}, () => drawTane()); lives[id] = life; });
     await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), {
-        status: "playing", 
-        turnOrder: pIds, 
-        currentTurnIndex: 0,
-        hands: hands, 
-        lives: lives, 
-        discardPile: [drawTane()], 
-        publicArea: [], 
-        phase: "draw"
+        status: "playing", turnOrder: pIds, currentTurnIndex: 0,
+        hands, lives, discardPile: [drawTane()], publicArea: [], phase: "draw"
     });
 }
 
@@ -160,117 +186,69 @@ function render(state) {
     const phase = state.phase;
     const canAction = isMyTurn && phase === "action";
     
-    // ボタンの有効・無効制御
     document.getElementById('btn-melt').disabled = !canAction || selectedHandIndices.length < 2;
     document.getElementById('btn-attach').disabled = !canAction || selectedHandIndices.length !== 1 || selectedPublicIndex === -1;
-    const discardBtn = document.getElementById('btn-discard');
-    discardBtn.disabled = !(canAction && selectedHandIndices.length === 1);
+    document.getElementById('btn-discard').disabled = !canAction || selectedHandIndices.length !== 1;
     
-    // ホスト用開始ボタン
     const startBtn = document.getElementById('start-btn');
-    if(state.status === "waiting" && state.hostId === myId) {
-        startBtn.classList.remove('hidden');
-    } else {
-        startBtn.classList.add('hidden');
-    }
+    if(state.status === "waiting" && state.hostId === myId) startBtn.classList.remove('hidden'); else startBtn.classList.add('hidden');
     
-    // プレイヤー状態
     const statusArea = document.getElementById('player-status-area');
     if(state.turnOrder) {
         statusArea.innerHTML = state.turnOrder.map((id, i) => {
             const active = i === state.currentTurnIndex ? 'active-turn' : '';
-            const pName = roomPlayers[id]?.name || "待機中...";
-            const life = state.lives ? state.lives[id] : 0;
-            const handCount = state.hands && state.hands[id] ? state.hands[id].length : 0;
-            return `<div class="player-card ${active}">${pName} (HP:${life} / 🎴:${handCount})</div>`;
+            return `<div class="player-card ${active}">${roomPlayers[id]?.name || "..."}(HP:${state.lives[id]} / 🎴:${state.hands[id]?.length || 0})</div>`;
         }).join('');
     }
 
-    // 捨て札
-    const discardPile = state.discardPile || [];
-    const topDiscard = discardPile.length > 0 ? discardPile[discardPile.length - 1] : "-";
-    document.getElementById('discard-pile').innerText = topDiscard;
+    document.getElementById('discard-pile').innerText = (state.discardPile || []).slice(-1)[0] || "-";
 
-    // 公開エリア
     const pubArea = document.getElementById('public-area');
-    pubArea.innerHTML = (state.publicArea || []).map((kanji, i) => 
-        `<div class="melted-kanji ${selectedPublicIndex === i ? 'selected' : ''}" onclick="selectPublic(${i})">${kanji}</div>`
-    ).join('');
+    pubArea.innerHTML = (state.publicArea || []).map((kanji, i) => {
+        const isNew = (currentGameState && i === state.publicArea.length - 1) ? 'anim-success' : '';
+        return `<div class="melted-kanji ${selectedPublicIndex === i ? 'selected' : ''} ${isNew}" onclick="selectPublic(${i})">${kanji}</div>`;
+    }).join('');
 
-    // 手札の表示（★アニメーション追加）
     const handCont = document.getElementById('my-hand-container');
     const myHand = (state.hands && state.hands[myId]) || [];
     handCont.innerHTML = myHand.map((t, i) => {
         const isSelected = selectedHandIndices.includes(i) ? 'selected' : '';
-        // ドロー直後（actionフェーズ）の最後の1枚にアニメーションを付与
         const isNew = (phase === "action" && i === myHand.length - 1) ? 'anim-draw' : '';
         return `<div class="tane-card ${isSelected} ${isNew}" onclick="selectHand(${i})">${t}</div>`;
     }).join('');
 
-    // メッセージ
     const sysMsg = document.getElementById('system-msg');
     if(isMyTurn) {
-        if (phase === "draw") {
-            sysMsg.innerText = "山札か捨て札を【1枚引いて】ください。";
-        } else if (selectedHandIndices.length === 0) {
-            sysMsg.innerText = "捨てるカードを【手札から1枚選択】してください。";
-        } else {
-            sysMsg.innerText = "「メルト」「付ける」を選ぶか、「1枚捨てる」で終了してください。";
-        }
+        sysMsg.innerText = (phase === "draw") ? "札を引いてください。" : "捨てる札を選ぶか、合体させてください。";
     } else {
-        sysMsg.innerText = state.status === "waiting" ? "他の参加者が揃うのを待っています..." : "相手が考えています...";
+        sysMsg.innerText = state.status === "waiting" ? "待機中..." : "相手の番です...";
     }
 }
 
 async function handleDraw(type) {
-    if (!currentGameState || currentGameState.phase !== "draw") return;
-    if (currentGameState.turnOrder[currentGameState.currentTurnIndex] !== myId) return;
-
-    playSE('se-draw'); // ★音を追加
+    if (!currentGameState || currentGameState.phase !== "draw" || currentGameState.turnOrder[currentGameState.currentTurnIndex] !== myId) return;
+    AudioEngine.playDraw();
     let newTane;
     let newDiscard = [...currentGameState.discardPile];
-    if (type === "deck") {
-        newTane = drawTane();
-    } else {
-        if(newDiscard.length === 0) return;
-        newTane = newDiscard.pop();
-    }
-
+    if (type === "deck") newTane = drawTane(); else { if(newDiscard.length === 0) return; newTane = newDiscard.pop(); }
     const newHand = [...(currentGameState.hands[myId] || []), newTane];
-    await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), {
-        [`hands/${myId}`]: newHand, 
-        discardPile: newDiscard, 
-        phase: "action"
-    });
+    await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { [`hands/${myId}`]: newHand, discardPile: newDiscard, phase: "action" });
 }
 
 async function handleDiscard() {
     if(selectedHandIndices.length !== 1) return;
-    playSE('se-select'); // ★音を追加
     const idx = selectedHandIndices[0];
     const myHand = [...currentGameState.hands[myId]];
     const discarded = myHand.splice(idx, 1)[0];
-    
-    if (myHand.length === 0) alert("上がり！おめでとうございます！");
-
     const nextIdx = (currentGameState.currentTurnIndex + 1) % currentGameState.turnOrder.length;
     selectedHandIndices = [];
-    await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), {
-        [`hands/${myId}`]: myHand,
-        discardPile: [...currentGameState.discardPile, discarded],
-        currentTurnIndex: nextIdx,
-        phase: "draw"
-    });
+    await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { [`hands/${myId}`]: myHand, discardPile: [...currentGameState.discardPile, discarded], currentTurnIndex: nextIdx, phase: "draw" });
 }
 
 function findMeltableKanji(tanes) {
     const sortedTanes = [...tanes].sort().join("");
     for (const [kanji, combinations] of Object.entries(KANJI_LOGIC_DATA)) {
-        for (const combo of combinations) {
-            if (combo.length === tanes.length && [...combo].sort().join("") === sortedTanes) {
-                return kanji;
-            }
-        }
+        for (const combo of combinations) { if (combo.length === tanes.length && [...combo].sort().join("") === sortedTanes) return kanji; }
     }
     return null;
 }
@@ -279,20 +257,12 @@ async function handleMelt() {
     const myHand = [...currentGameState.hands[myId]];
     const selectedTanes = selectedHandIndices.map(i => myHand[i]);
     const foundKanji = findMeltableKanji(selectedTanes);
-
     if (foundKanji) {
-        playSE('se-melt'); // ★成功音
         selectedHandIndices.sort((a,b) => b-a).forEach(i => myHand.splice(i, 1));
         const newPublic = [...(currentGameState.publicArea || []), foundKanji];
-        await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { 
-            [`hands/${myId}`]: myHand, 
-            publicArea: newPublic 
-        });
+        await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { [`hands/${myId}`]: myHand, publicArea: newPublic });
         selectedHandIndices = [];
-        if (myHand.length === 0) alert("上がり！");
-    } else {
-        reduceLife();
-    }
+    } else reduceLife();
 }
 
 async function handleAttach() {
@@ -301,39 +271,25 @@ async function handleAttach() {
     const tane = myHand[selectedHandIndices[0]];
     const baseKanji = currentGameState.publicArea[selectedPublicIndex];
     const targetPair = [tane, baseKanji].sort().join("");
-
     let found = null;
     for (const [kanji, combos] of Object.entries(KANJI_LOGIC_DATA)) {
-        if (combos.some(c => c.length === 2 && [...c].sort().join("") === targetPair)) {
-            found = kanji;
-            break;
-        }
+        if (combos.some(c => c.length === 2 && [...c].sort().join("") === targetPair)) { found = kanji; break; }
     }
-
     if (found) {
-        playSE('se-melt'); // ★成功音
         myHand.splice(selectedHandIndices[0], 1);
         const newPublic = [...currentGameState.publicArea];
         newPublic[selectedPublicIndex] = found;
         await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { [`hands/${myId}`]: myHand, publicArea: newPublic });
         selectedHandIndices = []; selectedPublicIndex = -1;
-        if (myHand.length === 0) alert("上がり！");
-    } else {
-        reduceLife();
-    }
+    } else reduceLife();
 }
 
 async function reduceLife() {
-    playSE('se-error'); // ★エラー音
-    
-    // ★アニメーション：画面を揺らす
-    const ui = document.getElementById('game-ui');
-    ui.classList.add('anim-shake');
-    setTimeout(() => ui.classList.remove('anim-shake'), 300);
-
+    AudioEngine.playError();
+    document.getElementById('game-ui').classList.add('anim-shake');
+    setTimeout(() => document.getElementById('game-ui').classList.remove('anim-shake'), 400);
     const newLife = currentGameState.lives[myId] - 1;
-    alert("合体失敗！ライフ減少！");
+    alert("合体失敗！");
     await update(ref(db, `rooms/kanji-rummy/${roomId}/state/lives`), { [myId]: newLife });
-    if (newLife <= 0) alert("負けが決定しました...");
     selectedHandIndices = [];
 }

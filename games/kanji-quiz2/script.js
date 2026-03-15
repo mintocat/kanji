@@ -1,7 +1,7 @@
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 import { wordList } from '../kanji-quiz/words.js';
 
-// --- 演出用関数 ---
+// --- 演出用関数（変更なし） ---
 const playSound = (type) => {
     try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -68,6 +68,7 @@ let myName = localStorage.getItem('myKanjiName') || "名無しさん";
 
 let roomPlayers = {};
 let currentGameState = null;
+let selectedStrokeIndex = -1; // 選択中の手札インデックス
 
 window.addEventListener('DOMContentLoaded', () => {
     if (!roomId) {
@@ -79,7 +80,12 @@ window.addEventListener('DOMContentLoaded', () => {
         };
         document.getElementById('create-room-btn').onclick = async () => {
             const newRoomId = Math.floor(100 + Math.random() * 900).toString();
-            await set(ref(db, `rooms/kanji-quiz2/${newRoomId}/state`), { status: "waiting", hostId: myId });
+            const gravityMode = document.getElementById('gravity-mode-check').checked;
+            await set(ref(db, `rooms/kanji-quiz2/${newRoomId}/state`), { 
+                status: "waiting", 
+                hostId: myId,
+                gravityMode: gravityMode
+            });
             window.location.href = `?room=${newRoomId}`;
         };
         document.getElementById('join-room-btn').onclick = () => {
@@ -109,7 +115,7 @@ window.addEventListener('DOMContentLoaded', () => {
         onValue(ref(db, `rooms/kanji-quiz2/${roomId}/scores`), (snapshot) => {
             const scores = snapshot.val() || {};
             const list = document.getElementById('score-list');
-            list.innerHTML = Object.entries(scores).map(([pId, s]) => `<div class="score-item"><span>${roomPlayers[pId] || '...'}</span><span>${s}回</span></div>`).join('');
+            list.innerHTML = Object.entries(scores).map(([pId, s]) => `<div class="score-item"><span>${roomPlayers[pId] || '...'}</span><span>${s}回</span></div>`).sort((a,b) => b.score - a.score).join('');
         });
 
         async function getStrokes(char, charIndex) {
@@ -117,7 +123,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
             const resp = await fetch(url);
             const text = await resp.text();
-            const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+            const doc = new DOMParser().parseFromString(text, "image/xml+svg");
             return Array.from(doc.querySelectorAll('path')).map(p => ({ d: p.getAttribute('d'), charIndex }));
         }
 
@@ -140,9 +146,9 @@ window.addEventListener('DOMContentLoaded', () => {
             pIds.forEach(id => {
                 for(let i=0; i<perPlayer; i++) hands[id].push(allStrokes[sIdx++]);
             });
-            const boardStrokes = allStrokes.slice(sIdx); // 余りを場に出す
+            const boardStrokes = allStrokes.slice(sIdx);
 
-            await set(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
+            await update(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
                 word, allStrokes, boardStrokes, hands, turnOrder,
                 currentTurnIndex: 0, status: "playing", hostId: myId,
                 lastGuess: { user: "", text: "", correct: false }, gameVotes: {}
@@ -167,23 +173,23 @@ window.addEventListener('DOMContentLoaded', () => {
                 resultUi.classList.add('hidden');
             } else if (data.status === "playing") {
                 startBtn.classList.add('hidden');
-                playUi.classList.remove('hidden');
-                resultUi.classList.toggle('hidden', data.lastGuess?.correct);
                 
                 const isCorrect = data.lastGuess?.correct;
                 updateCanvas(data, isCorrect);
                 
-                if (!isCorrect) {
-                    document.getElementById('turn-ui').classList.remove('hidden');
-                    renderHand(data);
+                if (isCorrect) {
+                    playUi.classList.add('hidden');
+                    resultUi.classList.remove('hidden');
+                    showResult(data.lastGuess.user);
                 } else {
-                    document.getElementById('turn-ui').classList.add('hidden');
+                    playUi.classList.remove('hidden');
+                    resultUi.classList.add('hidden');
+                    renderHand(data);
                 }
             }
 
-            if (data.lastGuess?.user) {
+            if (data.lastGuess?.user && !data.lastGuess.correct) {
                 document.getElementById('announcement').innerText = `${data.lastGuess.user}：${data.lastGuess.text}`;
-                if (data.lastGuess.correct) showResult(data.lastGuess.user);
             }
 
             const gVotes = data.gameVotes ? Object.keys(data.gameVotes).length : 0;
@@ -225,6 +231,25 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // 重心モード用のトランスフォーム計算
+        function getGravityTransform(pathD) {
+            const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            const tempPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            tempPath.setAttribute("d", pathD);
+            tempSvg.appendChild(tempPath);
+            tempSvg.style.visibility = "hidden";
+            tempSvg.style.position = "absolute";
+            document.body.appendChild(tempSvg);
+            
+            const bbox = tempPath.getBBox();
+            document.body.removeChild(tempSvg);
+
+            // パーツの中心を枠の中心(54.5, 54.5)に移動させる
+            const dx = 54.5 - (bbox.x + bbox.width / 2);
+            const dy = 54.5 - (bbox.y + bbox.height / 2);
+            return `translate(${dx}, ${dy})`;
+        }
+
         function renderHand(data) {
             const container = document.getElementById('my-hand-container');
             container.innerHTML = '';
@@ -233,7 +258,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const statusEl = document.getElementById('turn-status');
 
             if (isMyTurn) {
-                statusEl.innerText = "★ あなたの番です！画を選んでください ★";
+                statusEl.innerText = "★ あなたの番です！ ★";
                 statusEl.style.color = "#8b0000";
             } else {
                 const curName = roomPlayers[data.turnOrder?.[data.currentTurnIndex]] || "誰か";
@@ -243,22 +268,51 @@ window.addEventListener('DOMContentLoaded', () => {
 
             myHand.forEach((s, i) => {
                 const btn = document.createElement('button');
-                btn.className = 'hand-stroke-btn';
+                btn.className = `hand-stroke-btn ${selectedStrokeIndex === i ? 'selected' : ''}`;
                 btn.disabled = !isMyTurn;
-                btn.innerHTML = `<svg viewBox="0 0 109 109"><path d="${s.d}" stroke="#333" stroke-width="4" fill="none"/></svg>`;
+                
+                const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                svg.setAttribute("viewBox", "0 0 109 109");
+                const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                p.setAttribute("d", s.d);
+                p.setAttribute("stroke", "#333");
+                p.setAttribute("stroke-width", "4");
+                p.setAttribute("fill", "none");
+
+                // 重心モードがONならパーツを中央に寄せる
+                if (data.gravityMode) {
+                    p.setAttribute("transform", getGravityTransform(s.d));
+                }
+
+                svg.appendChild(p);
+                btn.appendChild(svg);
+
                 btn.onclick = () => {
                     if (!isMyTurn) return;
-                    const newHand = [...myHand];
-                    const played = newHand.splice(i, 1)[0];
-                    const newBoard = [...data.boardStrokes, played];
-                    const nextIdx = (data.currentTurnIndex + 1) % data.turnOrder.length;
-                    update(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
-                        [`hands/${myId}`]: newHand,
-                        boardStrokes: newBoard,
-                        currentTurnIndex: nextIdx
-                    });
+                    if (selectedStrokeIndex === i) {
+                        // 2回目のクリック：場に出す
+                        confirmPlayStroke(i);
+                        selectedStrokeIndex = -1;
+                    } else {
+                        // 1回目のクリック：選択する
+                        selectedStrokeIndex = i;
+                        renderHand(data);
+                    }
                 };
                 container.appendChild(btn);
+            });
+        }
+
+        function confirmPlayStroke(i) {
+            const myHand = [...currentGameState.hands[myId]];
+            const played = myHand.splice(i, 1)[0];
+            const newBoard = [...currentGameState.boardStrokes, played];
+            const nextIdx = (currentGameState.currentTurnIndex + 1) % currentGameState.turnOrder.length;
+            
+            update(ref(db, `rooms/kanji-quiz2/${roomId}/state`), {
+                [`hands/${myId}`]: myHand,
+                boardStrokes: newBoard,
+                currentTurnIndex: nextIdx
             });
         }
 
@@ -284,6 +338,7 @@ window.addEventListener('DOMContentLoaded', () => {
         function showResult(winner) {
             document.getElementById('winner-msg').innerText = `正解！勝者: ${winner}`;
             document.getElementById('correct-word-display').innerText = currentWord;
+            document.getElementById('announcement').innerText = "";
         }
 
         document.getElementById('start-btn').onclick = setupNewGame;

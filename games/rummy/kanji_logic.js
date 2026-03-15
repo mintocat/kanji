@@ -1,4 +1,4 @@
-const KANJI_LOGIC_DATA = 
+export const KANJI_LOGIC_DATA = 
 {
   "一": [ [ "一" ] ],
   "丁": [ [ "丁" ] ],

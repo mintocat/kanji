@@ -1,5 +1,5 @@
 import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
-import { wordList } from './words.js';
+import { wordList } from '../kanji-quiz/words.js';
 
 // --- 演出用関数（変更なし） ---
 const playSound = (type) => {

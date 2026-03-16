@@ -39,17 +39,19 @@ const AudioEngine = {
     }
 };
 
-const g1 = "口,木,艹,⺡,日,⺘,⺅,金,一,女,土,火,山,丶,言,丿,糹,⺖,田,大,十,⺮,心,宀,石,亠,貝".split(",");
-const g2 = "禾,又,目,⺼,辶,厶,隹,⺉,力,攵,勹,人,車,疒,寸,米,广,冖,夂,⺨,儿,⻖,酉,頁,彳,几,囗".split(",");
-const g3 = "尸,月,𠂉,厂,子,王,方,匕,白,斤,皿,䒑,灬,止,工,小,廾,夕,衣,𠂇,立,八,刀,匚,戈,巾,士".split(",");
-const g4 = "虍,爫,冂,示,豆,門,耳,羽,兀,㔾,⻗,㐅,欠,丁,⺊,龷,糸,比,⺧,⺌,耂,戊,干,而,丂,户,魚,殳".split(",");
+// --- カードデータ定義 ---
+const g1 = "口,木,艹,⺡,⺘,⺅,金,一,女,土,火,山,丶,言,丿,糸,⺖,大,十,⺮,心,宀,石,亠,貝,禾".split(",");
+const g2 = "又,月,⻌,厶,隹,⺉,力,攵,勹,人,車,疒,寸,米,广,冖,夂,⺨,儿,⻏,酉,頁,彳,几,尸,𠂉".split(",");
+const g3 = "厂,子,方,匕,白,斤,䒑,灬,止,工,小,廾,夕,衣,衤,𠂇,立,八,刀,匚,弋,巾,士,虍,爫,冂,廾".split(",");
+const g4 = "示,礻,豆,門,耳,羽,㔾,雨,欠,丁,⺊,龷,糸,比,⺧,⺌,耂,戊,干,丂,戸,魚,殳,彐,⺈,𦉫,⺍".split(",");
 
 function drawTane() {
     const r = Math.random() * 100;
-    const group = r < 30 ? g1 : r < 57 ? g2 : r < 80 ? g3 : g4;
+    const group = r < 25 ? g1 : r < 50 ? g2 : r < 75 ? g3 : g4; //25%,25%,25%,25%
     return group[Math.floor(Math.random() * group.length)];
 }
 
+// --- 部屋・プレイヤー設定 ---
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
 let myId = sessionStorage.getItem('myPlayerId') || Math.random().toString(36).substring(7);
@@ -61,10 +63,11 @@ let roomPlayers = {};
 let selectedHandIndices = []; 
 let selectedPublicIndex = -1; 
 
-// ★バグ修正の鍵：前回の枚数を記録する変数
+// アニメーション制御用
 let prevHandLength = 0;
 let prevPublicLength = 0;
 
+// --- UI操作イベント ---
 window.selectHand = (i) => {
     AudioEngine.playSelect();
     if (selectedHandIndices.includes(i)) selectedHandIndices = selectedHandIndices.filter(idx => idx !== i);
@@ -80,6 +83,7 @@ window.selectPublic = (i) => {
 
 window.addEventListener('DOMContentLoaded', () => { if (!roomId) initLobby(); else initGame(); });
 
+// --- ロビー処理 ---
 function initLobby() {
     const nameDisplay = document.getElementById('lobby-my-name');
     nameDisplay.innerText = myName;
@@ -100,6 +104,7 @@ function initLobby() {
     };
 }
 
+// --- ゲーム初期化 ---
 function initGame() {
     document.getElementById('lobby-ui').classList.add('hidden');
     document.getElementById('game-ui').classList.remove('hidden');
@@ -129,6 +134,7 @@ async function setupGame() {
     await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { status: "playing", turnOrder: pIds, currentTurnIndex: 0, hands, lives, discardPile: [drawTane()], publicArea: [], phase: "draw" });
 }
 
+// --- 描画処理 ---
 function render(state) {
     if(!state) return;
     const isMyTurn = state.turnOrder && state.turnOrder[state.currentTurnIndex] === myId;
@@ -152,20 +158,16 @@ function render(state) {
 
     document.getElementById('discard-pile').innerText = (state.discardPile || []).slice(-1)[0] || "-";
 
-    // ★バグ修正：公開エリアの描画
     const pubArea = document.getElementById('public-area');
     const currentPublic = state.publicArea || [];
-    // 枚数が増えた時だけ末尾にアニメーションを付ける
     const isNewPublicAdded = currentPublic.length > prevPublicLength;
     pubArea.innerHTML = currentPublic.map((kanji, i) => {
         const animClass = (isNewPublicAdded && i === currentPublic.length - 1) ? 'anim-success' : '';
         return `<div class="melted-kanji ${selectedPublicIndex === i ? 'selected' : ''} ${animClass}" onclick="selectPublic(${i})">${kanji}</div>`;
     }).join('');
 
-    // ★バグ修正：手札の描画
     const handCont = document.getElementById('my-hand-container');
     const myHand = (state.hands && state.hands[myId]) || [];
-    // 枚数が増えた時だけ末尾にアニメーションを付ける
     const isNewHandAdded = myHand.length > prevHandLength;
     handCont.innerHTML = myHand.map((t, i) => {
         const isSelected = selectedHandIndices.includes(i) ? 'selected' : '';
@@ -173,7 +175,6 @@ function render(state) {
         return `<div class="tane-card ${isSelected} ${animClass}" onclick="selectHand(${i})">${t}</div>`;
     }).join('');
 
-    // 最後に今回の枚数を保存（次回の比較用）
     prevHandLength = myHand.length;
     prevPublicLength = currentPublic.length;
 
@@ -182,6 +183,7 @@ function render(state) {
     else sysMsg.innerText = state.status === "waiting" ? "待機中..." : "相手の番です...";
 }
 
+// --- ゲームロジック：ドロー・破棄 ---
 async function handleDraw(type) {
     if (!currentGameState || currentGameState.phase !== "draw" || currentGameState.turnOrder[currentGameState.currentTurnIndex] !== myId) return;
     AudioEngine.playDraw();
@@ -199,10 +201,34 @@ async function handleDiscard() {
     await update(ref(db, `rooms/kanji-rummy/${roomId}/state`), { [`hands/${myId}`]: myHand, discardPile: [...currentGameState.discardPile, discarded], currentTurnIndex: nextIdx, phase: "draw" });
 }
 
-function findMeltableKanji(tanes) {
-    const sortedTanes = [...tanes].sort().join("");
-    for (const [kanji, combinations] of Object.entries(KANJI_LOGIC_DATA)) {
-        for (const combo of combinations) { if (combo.length === tanes.length && [...combo].sort().join("") === sortedTanes) return kanji; }
+// --- ゲームロジック：漢字合体判定（再帰強化版） ---
+
+/**
+ * パーツのリストを、最小単位の「たね」まで再帰的に分解する関数
+ */
+function decomposeToSeeds(parts) {
+    let seeds = [];
+    parts.forEach(part => {
+        if (KANJI_LOGIC_DATA[part] && KANJI_LOGIC_DATA[part].length > 0) {
+            // 最も基本となる最初のレシピ（index 0）を使って分解
+            seeds.push(...decomposeToSeeds(KANJI_LOGIC_DATA[part][0]));
+        } else {
+            seeds.push(part);
+        }
+    });
+    return seeds;
+}
+
+/**
+ * 選択されたパーツ群から作れる漢字を、全レシピの「最小単位の比較」で探す
+ */
+function findMeltableKanji(selectedParts) {
+    const userSeedsSorted = decomposeToSeeds(selectedParts).sort().join("");
+    for (const [targetKanji, recipes] of Object.entries(KANJI_LOGIC_DATA)) {
+        for (const recipeParts of recipes) {
+            const recipeSeedsSorted = decomposeToSeeds(recipeParts).sort().join("");
+            if (userSeedsSorted === recipeSeedsSorted) return targetKanji;
+        }
     }
     return null;
 }
@@ -220,12 +246,12 @@ async function handleMelt() {
 
 async function handleAttach() {
     if (selectedHandIndices.length !== 1 || selectedPublicIndex === -1) return;
-    const myHand = [...currentGameState.hands[myId]]; const tane = myHand[selectedHandIndices[0]];
-    const baseKanji = currentGameState.publicArea[selectedPublicIndex]; const targetPair = [tane, baseKanji].sort().join("");
-    let found = null;
-    for (const [kanji, combos] of Object.entries(KANJI_LOGIC_DATA)) {
-        if (combos.some(c => c.length === 2 && [...c].sort().join("") === targetPair)) { found = kanji; break; }
-    }
+    const myHand = [...currentGameState.hands[myId]]; const handPart = myHand[selectedHandIndices[0]];
+    const boardKanji = currentGameState.publicArea[selectedPublicIndex];
+    
+    // 再帰ロジックを使用した共通の判定関数を呼び出す
+    const found = findMeltableKanji([handPart, boardKanji]);
+    
     if (found) {
         myHand.splice(selectedHandIndices[0], 1); const newPublic = [...currentGameState.publicArea];
         newPublic[selectedPublicIndex] = found;

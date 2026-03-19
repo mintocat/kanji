@@ -4,10 +4,9 @@ import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 const KANA_LIST = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやいゆえよらりるれろわをんー".split("");
 const SHINOBI_BASE_PATH = "rooms/shinobi-iroha";
 
-// 偏(へん)抽出用のベース漢字
-const HEN_CANDIDATES = ["録", "時", "討", "村", "海", "焼", "地", "休", "呼", "肝"]; 
-// 旁(つくり)抽出用のベース漢字
-const TSUKURI_CANDIDATES = ["討", "和", "功", "汝", "好", "沁", "粒", "初", "取", "肥"];
+// ユーザー様指定の候補漢字（ここから部位を抜き出します）
+const HEN_CANDIDATES = ["録", "時", "討", "村", "海", "焼", "地", "休", "呼", "肝", "語", "編"]; 
+const TSUKURI_CANDIDATES = ["討", "和", "功", "汝", "好", "沁", "粒", "初", "取", "肥", "時", "測"];
 
 const QUESTION_SENTENCES = [
     "にんじゃのあんごうをときあかせ",
@@ -55,7 +54,7 @@ const playSound = (type) => {
     } catch(e) {}
 };
 
-// --- 【修正済み】部位抽出ロジック ---
+// --- 【改善版】部位抽出ロジック ---
 async function getKanjiPartPaths(char, position) {
     const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
     const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
@@ -65,24 +64,23 @@ async function getKanjiPartPaths(char, position) {
         const doc = new DOMParser().parseFromString(text, "image/svg+xml");
         let paths = [];
         
-        // 全てのグループタグを走査
         const gs = Array.from(doc.getElementsByTagName('g'));
-        const targetGroup = gs.find(g => {
-            // kvg:position 属性を名前空間に依存せず検索
-            for (let attr of g.attributes) {
-                if (attr.name.endsWith('position') && attr.value === position) return true;
+        gs.forEach(g => {
+            // 名前空間を問わず「position」という名前を含む属性を探す
+            const posAttr = Array.from(g.attributes).find(a => a.name.includes('position'));
+            if (posAttr && posAttr.value === position) {
+                // そのグループ内のすべてのパスを収集
+                Array.from(g.getElementsByTagName('path')).forEach(p => {
+                    const d = p.getAttribute('d');
+                    if (d && !paths.includes(d)) paths.push(d);
+                });
             }
-            return false;
         });
 
-        if (targetGroup) {
-            // 特定した部位グループ内のパスのみを収集
-            Array.from(targetGroup.querySelectorAll('path')).forEach(p => {
-                const d = p.getAttribute('d');
-                if (d) paths.push(d);
-            });
+        // 保険：部位が見つからなかった場合は全パスを返す（表示が消えるのを防ぐ）
+        if (paths.length === 0) {
+            return Array.from(doc.getElementsByTagName('path')).map(p => p.getAttribute('d')).filter(d => d);
         }
-        
         return paths;
     } catch(e) { return []; }
 }
@@ -91,7 +89,7 @@ async function createCombinedSVG(henBaseChar, tsukuriBaseChar) {
     const henPaths = await getKanjiPartPaths(henBaseChar, "left");
     const tsukuriPaths = await getKanjiPartPaths(tsukuriBaseChar, "right");
     
-    // パーツ同士は元の座標を維持しているため、重ねるだけで正しい位置に配置されます
+    // パーツはKanjiVG内で既に正しい位置にあるため、そのまま重ねる
     let combined = `<svg viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg">`;
     
     // 偏の描画

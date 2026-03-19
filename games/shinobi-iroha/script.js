@@ -4,9 +4,10 @@ import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 const KANA_LIST = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやいゆえよらりるれろわをんー".split("");
 const SHINOBI_BASE_PATH = "rooms/shinobi-iroha";
 
-// 偏(へん)候補に、より漢字らしく見える字形（にんべん・さんずい等）を追加
-const HEN_CANDIDATES = ["亻", "木", "氵", "火", "土", "金", "身", "口", "日", "月"]; 
-const TSUKURI_CANDIDATES = ["口", "力", "女", "子", "寸", "心", "立", "刀", "又", "巴"];
+// 【変更点】偏(へん)として使うベース漢字（ここから左半分を抽出します）
+const HEN_CANDIDATES = ["録", "時", "討", "村", "海", "焼", "地", "休", "呼", "肝"]; 
+// 【変更点】旁(つくり)として使うベース漢字（ここから右半分を抽出します）
+const TSUKURI_CANDIDATES = ["討", "和", "功", "汝", "好", "沁", "粒", "初", "取", "肥"];
 
 const QUESTION_SENTENCES = [
     "にんじゃのあんごうをときあかせ",
@@ -24,7 +25,7 @@ const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('room');
 let myId = sessionStorage.getItem('myPlayerId') || Math.random().toString(36).substring(7);
 sessionStorage.setItem('myPlayerId', myId);
-let myName = localStorage.getItem('myShinobiName') || ""; // 初期値は空
+let myName = localStorage.getItem('myShinobiName') || ""; 
 
 let roomPlayers = {};
 let currentGameState = null;
@@ -54,37 +55,60 @@ const playSound = (type) => {
     } catch(e) {}
 };
 
-// --- SVG合成 (【修正済み】偏と旁を近づけるためtranslate数値を調整) ---
-async function getKanjiPaths(char) {
+// --- 【変更点】SVG合成（変形なしで部位抽出して合体） ---
+
+// 指定した漢字から「左半分(left)」または「右半分(right)」のパスだけを抽出する
+async function getKanjiPartPaths(char, position) {
     const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
     const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
     try {
         const resp = await fetch(url);
         const text = await resp.text();
         const doc = new DOMParser().parseFromString(text, "image/svg+xml");
-        return Array.from(doc.querySelectorAll('path')).map(p => p.getAttribute('d'));
+        let paths = [];
+        
+        // KanjiVG内の <g kvg:position="left" または "right"> のグループを探す
+        const gs = doc.querySelectorAll('g');
+        for (let g of gs) {
+            if (g.getAttribute('kvg:position') === position) {
+                // その部位に含まれるすべての筆画(path)を取得
+                Array.from(g.querySelectorAll('path')).forEach(p => paths.push(p.getAttribute('d')));
+                break; // 見つかったら終了
+            }
+        }
+        
+        // 万が一見つからなかった場合の保険
+        if (paths.length === 0) {
+            return Array.from(doc.querySelectorAll('path')).map(p => p.getAttribute('d'));
+        }
+        return paths;
     } catch(e) { return []; }
 }
 
-async function createCombinedSVG(henChar, tsukuriChar) {
-    const henPaths = await getKanjiPaths(henChar);
-    const tsukuriPaths = await getKanjiPaths(tsukuriChar);
-    let combined = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">`;
-    // 偏：幅を42%に、少し左寄せ
-    combined += `<g transform="scale(0.42, 0.95) translate(5, 2)">`;
-    henPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`);
+async function createCombinedSVG(henBaseChar, tsukuriBaseChar) {
+    // それぞれの漢字から必要なパーツだけを抽出
+    const henPaths = await getKanjiPartPaths(henBaseChar, "left");
+    const tsukuriPaths = await getKanjiPartPaths(tsukuriBaseChar, "right");
+    
+    // KanjiVGは元々 109x109 のサイズで作られており、偏と旁のパスもすでに適切な位置・サイズになっています。
+    // そのため、scaleやtranslateで歪ませる必要がなく、そのまま描画するだけで完璧な合字になります。
+    let combined = `<svg viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg">`;
+    
+    combined += `<g>`;
+    // 書道的な自然さを出すため、線の太さをKanjiVG標準の「3」に設定
+    henPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`);
     combined += `</g>`;
-    // 旁：幅を60%に、【修正箇所】偏にしっかり食い込ませるためtranslateのXを65から45に減らす
-    combined += `<g transform="scale(0.60, 1.0) translate(45, 0)">`;
-    tsukuriPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`);
+    
+    combined += `<g>`;
+    tsukuriPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`);
     combined += `</g>`;
+    
     combined += `</svg>`;
     return combined;
 }
 
 // --- メインロジック ---
 window.addEventListener('DOMContentLoaded', () => {
-    // 1. ロビー画面を表示
     document.getElementById('lobby-ui').classList.remove('hidden');
     document.getElementById('game-ui').classList.add('hidden');
 
@@ -95,7 +119,7 @@ window.addEventListener('DOMContentLoaded', () => {
             if (!roomId) {
                 document.getElementById('room-controls').classList.remove('hidden');
             } else {
-                enterGame(); // IDがあれば自動でゲーム画面へ
+                enterGame(); 
             }
         } else {
             document.getElementById('name-setup').classList.remove('hidden');
@@ -103,7 +127,6 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // 名前保存
     document.getElementById('save-name-btn').onclick = () => {
         const val = document.getElementById('name-input').value.trim();
         if (val) {
@@ -113,7 +136,6 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // ルーム作成・参加
     document.getElementById('create-room-btn').onclick = async () => {
         const newRoomId = Math.floor(100 + Math.random() * 900).toString();
         await set(ref(db, `${SHINOBI_BASE_PATH}/${newRoomId}/state`), { status: "waiting", hostId: myId });
@@ -125,17 +147,14 @@ window.addEventListener('DOMContentLoaded', () => {
         if (inputId && inputId.length === 3) window.location.href = `?room=${inputId}`;
     };
 
-    // ゲーム画面に入る処理
     const enterGame = () => {
         document.getElementById('lobby-ui').classList.add('hidden');
         document.getElementById('game-ui').classList.remove('hidden');
         document.getElementById('display-room-id').innerText = roomId;
         document.getElementById('display-my-name').innerText = myName;
 
-        // Firebaseに参加登録
         set(ref(db, `${SHINOBI_BASE_PATH}/${roomId}/players/${myId}`), myName);
 
-        // 参加者、スコア、状態の監視を開始
         onValue(ref(db, `${SHINOBI_BASE_PATH}/${roomId}/players`), (snapshot) => {
             roomPlayers = snapshot.val() || {};
             document.getElementById('player-list').innerHTML = Object.values(roomPlayers).map(name => `<span class="player-tag">${name}</span>`).join('');
@@ -180,11 +199,8 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    // 初期実行
     updateUIState();
 });
-
-// --- 以降のゲームロジックは変更なし ---
 
 async function setupNewGame() {
     const startBtn = document.getElementById('start-btn');

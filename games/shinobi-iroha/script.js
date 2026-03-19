@@ -54,15 +54,25 @@ const playSound = (type) => {
 };
 
 // --- SVG合成 ---
-async function getKanjiPaths(char) {
-    const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
-    const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
-    try {
-        const resp = await fetch(url);
-        const text = await resp.text();
-        const doc = new DOMParser().parseFromString(text, "image/svg+xml");
-        return Array.from(doc.querySelectorAll('path')).map(p => p.getAttribute('d'));
-    } catch(e) { return []; }
+async function createCombinedSVG(henChar, tsukuriChar) {
+    const henPaths = await getKanjiPaths(henChar);
+    const tsukuriPaths = await getKanjiPaths(tsukuriChar);
+
+    let combined = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">`;
+
+    // 1. 偏（左側）の調整：幅を42%に絞り、少しだけ上に配置
+    combined += `<g transform="scale(0.42, 0.95) translate(5, 2)">`;
+    henPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`);
+    combined += `</g>`;
+
+    // 2. 旁（右側）の調整：幅を60%に設定し、左に5%ほど食い込ませる（オーバーラップ）
+    // translate(65, ...) の数値を調整して「食い込み具合」を制御
+    combined += `<g transform="scale(0.60, 1.0) translate(65, 0)">`;
+    tsukuriPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`);
+    combined += `</g>`;
+
+    combined += `</svg>`;
+    return combined;
 }
 
 async function createCombinedSVG(henChar, tsukuriChar) {

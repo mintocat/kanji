@@ -3,10 +3,10 @@ import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 // --- ゲーム設定 ---
 const KANA_LIST = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやいゆえよらりるれろわをんー".split("");
 const SHINOBI_BASE_PATH = "rooms/shinobi-iroha";
+const KVG_NS = "http://kanjivg.tagaini.net"; // KanjiVGの正式な名前空間URL
 
-// ユーザー様指定：偏（左）を抜き出すための漢字
+// 偏と旁の候補
 const HEN_CANDIDATES = ["録", "時", "討", "村", "海", "焼", "地", "休", "呼", "肝"]; 
-// ユーザー様指定：旁（右）を抜き出すための漢字
 const TSUKURI_CANDIDATES = ["討", "和", "功", "汝", "好", "沁", "粒", "初", "取", "肥"];
 
 const QUESTION_SENTENCES = [
@@ -40,25 +40,26 @@ const playSound = (type) => {
         osc.connect(gain); gain.connect(ctx.destination);
         const now = ctx.currentTime;
         if (type === 'start') {
-            osc.frequency.setValueAtTime(440, now); osc.frequency.exponentialRampToValueAtTime(880, now + 0.2);
-            gain.gain.setValueAtTime(0.05, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+            osc.frequency.setValueAtTime(440, now);
+            gain.gain.setValueAtTime(0.05, now);
             osc.start(); osc.stop(now + 0.2);
         } else if (type === 'correct') {
             [523.25, 659.25, 783.99].forEach((freq, i) => {
                 const o = ctx.createOscillator(); const g = ctx.createGain();
                 o.connect(g); g.connect(ctx.destination);
                 o.frequency.setValueAtTime(freq, now + i * 0.1);
-                g.gain.setValueAtTime(0.05, now + i * 0.1); g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.3);
+                g.gain.setValueAtTime(0.05, now + i * 0.1);
                 o.start(now + i * 0.1); o.stop(now + i * 0.1 + 0.3);
             });
         }
     } catch(e) {}
 };
 
-// --- 【精密抽出版】部位抽出ロジック ---
+// --- 【最終修正】部位抽出ロジック ---
 async function getKanjiPartPaths(char, position) {
     const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
     const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
+    
     try {
         const resp = await fetch(url);
         if (!resp.ok) return [];
@@ -66,49 +67,40 @@ async function getKanjiPartPaths(char, position) {
         const doc = new DOMParser().parseFromString(text, "image/svg+xml");
         
         let paths = [];
-        // 全ての <g> タグを調査
         const groups = Array.from(doc.getElementsByTagName('g'));
         
-        for (const g of groups) {
-            // position属性(left/right)を持っているグループのみを対象にする
-            // 名前空間の差異を吸収するため、複数の取得方法を試行
-            const pos = g.getAttribute('kvg:position') || g.getAttribute('position') || 
-                        Array.from(g.attributes).find(a => a.localName === 'position')?.value;
+        // 正確に「偏(left)」または「旁(right)」のグループを探す
+        const targetGroup = groups.find(g => {
+            // 名前空間付き属性、または通常の属性の両方をチェック
+            return g.getAttributeNS(KVG_NS, 'position') === position || 
+                   g.getAttribute('kvg:position') === position;
+        });
 
-            if (pos === position) {
-                // その部位に直接属するパス、または子階層にあるパスをすべて収集
-                const foundPaths = Array.from(g.getElementsByTagName('path'))
-                                        .map(p => p.getAttribute('d'))
-                                        .filter(d => d);
-                
-                // 重複を避けつつ追加
-                foundPaths.forEach(d => { if (!paths.includes(d)) paths.push(d); });
-
-                // 最も外側の「left/right」グループを見つけたら、
-                // その中の子階層にある重複したposition属性は追わないようにする
-                if (paths.length > 0) break;
-            }
+        if (targetGroup) {
+            // そのグループに含まれる全パスのd属性を取得
+            Array.from(targetGroup.getElementsByTagName('path')).forEach(p => {
+                const d = p.getAttribute('d');
+                if (d) paths.push(d);
+            });
         }
         
-        return paths; // 何も見つからなければ空配列を返す（＝全体表示を回避）
-    } catch(e) { 
-        console.error("Fetch error:", e);
-        return []; 
+        return paths;
+    } catch(e) {
+        console.error("SVG取得エラー:", e);
+        return [];
     }
 }
 
-async function createCombinedSVG(henBaseChar, tsukuriBaseChar) {
-    const henPaths = await getKanjiPartPaths(henBaseChar, "left");
-    const tsukuriPaths = await getKanjiPartPaths(tsukuriBaseChar, "right");
-    
-    // 偏と旁、どちらかが空でも「一文字全体」が表示されないように厳守
-    let combined = `<svg viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%;">`;
-    
-    // 墨の質感を出すため、線の太さを3に固定、端を丸く設定
-    const pathStyle = `fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"`;
-    
-    henPaths.forEach(d => { combined += `<path d="${d}" ${pathStyle} />`; });
-    tsukuriPaths.forEach(d => { combined += `<path d="${d}" ${pathStyle} />`; });
+async function createCombinedSVG(henChar, tsukuriChar) {
+    const henPaths = await getKanjiPartPaths(henChar, "left");
+    const tsukuriPaths = await getKanjiPartPaths(tsukuriChar, "right");
+
+    // どちらかが取得できなくても、空のSVGにならないよう最低限の描画を行う
+    let combined = `<svg viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg">`;
+    const style = `fill="none" stroke="black" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"`;
+
+    henPaths.forEach(d => { combined += `<path d="${d}" ${style} />`; });
+    tsukuriPaths.forEach(d => { combined += `<path d="${d}" ${style} />`; });
     
     combined += `</svg>`;
     return combined;
@@ -187,7 +179,10 @@ window.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('start-btn').classList.add('hidden');
                 document.getElementById('play-screen').classList.remove('hidden');
                 document.getElementById('result-overlay').classList.add('hidden');
+                
+                // SVGマップ構築（未構築の場合のみ）
                 if (Object.keys(shinobiSvgMap).length === 0) {
+                    document.getElementById('status-msg').innerText = "暗号を生成中...";
                     await buildShinobiMap(data.henChars, data.tsukuriChars);
                     renderDecodeTable(data.henChars, data.tsukuriChars);
                     renderCipherText(data.answer);
@@ -230,15 +225,18 @@ async function setupNewGame() {
 async function buildShinobiMap(hens, tsus) {
     shinobiSvgMap = {};
     let kanaIdx = 0;
+    console.log("忍び文字を合成中...");
     for (let h of hens) {
         for (let t of tsus) {
             if (kanaIdx < KANA_LIST.length) {
+                const char = KANA_LIST[kanaIdx];
                 const svg = await createCombinedSVG(h, t);
-                shinobiSvgMap[KANA_LIST[kanaIdx]] = svg;
+                shinobiSvgMap[char] = svg;
                 kanaIdx++;
             }
         }
     }
+    console.log("忍び文字の合成が完了しました。");
 }
 
 function renderCipherText(answer) {
@@ -246,8 +244,12 @@ function renderCipherText(answer) {
     area.innerHTML = '';
     answer.split("").forEach(char => {
         const div = document.createElement("div");
-        if (char === " " || char === "　") div.className = "cipher-char space";
-        else { div.className = "cipher-char"; div.innerHTML = shinobiSvgMap[char] || "?"; }
+        if (char === " " || char === "　") {
+            div.className = "cipher-char space";
+        } else {
+            div.className = "cipher-char";
+            div.innerHTML = shinobiSvgMap[char] || "?";
+        }
         area.appendChild(div);
     });
 }
@@ -262,7 +264,8 @@ function renderDecodeTable(hens, tsus) {
         table.appendChild(createCell(h, "header-cell")); 
         tsus.forEach(t => {
             if (kanaIdx < KANA_LIST.length) {
-                const cell = createCell(shinobiSvgMap[KANA_LIST[kanaIdx]], "cell");
+                const char = KANA_LIST[kanaIdx];
+                const cell = createCell(shinobiSvgMap[char], "cell");
                 const input = document.createElement("input");
                 input.type = "text"; input.className = "memo-input"; input.maxLength = 1;
                 const memoKey = `shinobi_memo_${roomId}_${kanaIdx}`;
@@ -279,8 +282,8 @@ function renderDecodeTable(hens, tsus) {
 function createCell(content, className) {
     const div = document.createElement("div");
     div.className = className;
-    if (content.startsWith("<svg")) div.innerHTML = content;
-    else div.innerText = content;
+    if (content && content.startsWith("<svg")) div.innerHTML = content;
+    else div.innerText = content || "";
     return div;
 }
 
@@ -288,9 +291,10 @@ document.getElementById('submit-btn').onclick = () => {
     const input = document.getElementById('answer-input');
     const guess = input.value.trim().replace(/\s+/g, "");
     if (!guess) return;
-    if (guess === currentGameState.answer) {
+    if (guess === currentGameState.answer.replace(/\s+/g, "")) {
         update(ref(db, `${SHINOBI_BASE_PATH}/${roomId}/state`), { status: "finished", winner: myName });
-        onValue(ref(db, `${SHINOBI_BASE_PATH}/${roomId}/scores/${myId}`), (s) => {
+        const scoreRef = ref(db, `${SHINOBI_BASE_PATH}/${roomId}/scores/${myId}`);
+        onValue(scoreRef, (s) => {
             update(ref(db, `${SHINOBI_BASE_PATH}/${roomId}/scores`), { [myId]: (s.val() || 0) + 1 });
         }, { onlyOnce: true });
         playSound('correct');

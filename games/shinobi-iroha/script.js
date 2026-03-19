@@ -4,9 +4,10 @@ import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 const KANA_LIST = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやいゆえよらりるれろわをんー".split("");
 const SHINOBI_BASE_PATH = "rooms/shinobi-iroha";
 
-// ユーザー様指定の候補漢字（ここから部位を抜き出します）
-const HEN_CANDIDATES = ["録", "時", "討", "村", "海", "焼", "地", "休", "呼", "肝", "語", "編"]; 
-const TSUKURI_CANDIDATES = ["討", "和", "功", "汝", "好", "沁", "粒", "初", "取", "肥", "時", "測"];
+// ユーザー様指定：偏（左）を抜き出すための漢字
+const HEN_CANDIDATES = ["録", "時", "討", "村", "海", "焼", "地", "休", "呼", "肝"]; 
+// ユーザー様指定：旁（右）を抜き出すための漢字
+const TSUKURI_CANDIDATES = ["討", "和", "功", "汝", "好", "沁", "粒", "初", "取", "肥"];
 
 const QUESTION_SENTENCES = [
     "にんじゃのあんごうをときあかせ",
@@ -54,53 +55,60 @@ const playSound = (type) => {
     } catch(e) {}
 };
 
-// --- 【改善版】部位抽出ロジック ---
+// --- 【精密抽出版】部位抽出ロジック ---
 async function getKanjiPartPaths(char, position) {
     const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
     const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
     try {
         const resp = await fetch(url);
+        if (!resp.ok) return [];
         const text = await resp.text();
         const doc = new DOMParser().parseFromString(text, "image/svg+xml");
-        let paths = [];
         
-        const gs = Array.from(doc.getElementsByTagName('g'));
-        gs.forEach(g => {
-            // 名前空間を問わず「position」という名前を含む属性を探す
-            const posAttr = Array.from(g.attributes).find(a => a.name.includes('position'));
-            if (posAttr && posAttr.value === position) {
-                // そのグループ内のすべてのパスを収集
-                Array.from(g.getElementsByTagName('path')).forEach(p => {
-                    const d = p.getAttribute('d');
-                    if (d && !paths.includes(d)) paths.push(d);
-                });
-            }
-        });
+        let paths = [];
+        // 全ての <g> タグを調査
+        const groups = Array.from(doc.getElementsByTagName('g'));
+        
+        for (const g of groups) {
+            // position属性(left/right)を持っているグループのみを対象にする
+            // 名前空間の差異を吸収するため、複数の取得方法を試行
+            const pos = g.getAttribute('kvg:position') || g.getAttribute('position') || 
+                        Array.from(g.attributes).find(a => a.localName === 'position')?.value;
 
-        // 保険：部位が見つからなかった場合は全パスを返す（表示が消えるのを防ぐ）
-        if (paths.length === 0) {
-            return Array.from(doc.getElementsByTagName('path')).map(p => p.getAttribute('d')).filter(d => d);
+            if (pos === position) {
+                // その部位に直接属するパス、または子階層にあるパスをすべて収集
+                const foundPaths = Array.from(g.getElementsByTagName('path'))
+                                        .map(p => p.getAttribute('d'))
+                                        .filter(d => d);
+                
+                // 重複を避けつつ追加
+                foundPaths.forEach(d => { if (!paths.includes(d)) paths.push(d); });
+
+                // 最も外側の「left/right」グループを見つけたら、
+                // その中の子階層にある重複したposition属性は追わないようにする
+                if (paths.length > 0) break;
+            }
         }
-        return paths;
-    } catch(e) { return []; }
+        
+        return paths; // 何も見つからなければ空配列を返す（＝全体表示を回避）
+    } catch(e) { 
+        console.error("Fetch error:", e);
+        return []; 
+    }
 }
 
 async function createCombinedSVG(henBaseChar, tsukuriBaseChar) {
     const henPaths = await getKanjiPartPaths(henBaseChar, "left");
     const tsukuriPaths = await getKanjiPartPaths(tsukuriBaseChar, "right");
     
-    // パーツはKanjiVG内で既に正しい位置にあるため、そのまま重ねる
-    let combined = `<svg viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg">`;
+    // 偏と旁、どちらかが空でも「一文字全体」が表示されないように厳守
+    let combined = `<svg viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%;">`;
     
-    // 偏の描画
-    henPaths.forEach(d => {
-        combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
-    });
+    // 墨の質感を出すため、線の太さを3に固定、端を丸く設定
+    const pathStyle = `fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"`;
     
-    // 旁の描画
-    tsukuriPaths.forEach(d => {
-        combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
-    });
+    henPaths.forEach(d => { combined += `<path d="${d}" ${pathStyle} />`; });
+    tsukuriPaths.forEach(d => { combined += `<path d="${d}" ${pathStyle} />`; });
     
     combined += `</svg>`;
     return combined;

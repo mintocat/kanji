@@ -54,7 +54,7 @@ const playSound = (type) => {
     } catch(e) {}
 };
 
-// --- SVG合成 (不自然さを解消するため4:6比率と重ねを適用) ---
+// --- SVG合成 (【修正済み】偏と旁を近づけるためtranslate数値を調整) ---
 async function getKanjiPaths(char) {
     const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
     const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
@@ -74,8 +74,8 @@ async function createCombinedSVG(henChar, tsukuriChar) {
     combined += `<g transform="scale(0.42, 0.95) translate(5, 2)">`;
     henPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`);
     combined += `</g>`;
-    // 旁：幅を60%に、左に少し食い込ませる（重ね）
-    combined += `<g transform="scale(0.60, 1.0) translate(65, 0)">`;
+    // 旁：幅を60%に、【修正箇所】偏にしっかり食い込ませるためtranslateのXを65から45に減らす
+    combined += `<g transform="scale(0.60, 1.0) translate(45, 0)">`;
     tsukuriPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`);
     combined += `</g>`;
     combined += `</svg>`;

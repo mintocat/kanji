@@ -4,9 +4,9 @@ import { db, ref, set, onValue, update } from '../../js/firebase-config.js';
 const KANA_LIST = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやいゆえよらりるれろわをんー".split("");
 const SHINOBI_BASE_PATH = "rooms/shinobi-iroha";
 
-// 【変更点】偏(へん)として使うベース漢字（ここから左半分を抽出します）
+// 偏(へん)抽出用のベース漢字
 const HEN_CANDIDATES = ["録", "時", "討", "村", "海", "焼", "地", "休", "呼", "肝"]; 
-// 【変更点】旁(つくり)として使うベース漢字（ここから右半分を抽出します）
+// 旁(つくり)抽出用のベース漢字
 const TSUKURI_CANDIDATES = ["討", "和", "功", "汝", "好", "沁", "粒", "初", "取", "肥"];
 
 const QUESTION_SENTENCES = [
@@ -55,9 +55,7 @@ const playSound = (type) => {
     } catch(e) {}
 };
 
-// --- 【変更点】SVG合成（変形なしで部位抽出して合体） ---
-
-// 指定した漢字から「左半分(left)」または「右半分(right)」のパスだけを抽出する
+// --- 【修正済み】部位抽出ロジック ---
 async function getKanjiPartPaths(char, position) {
     const unicode = char.charCodeAt(0).toString(16).padStart(5, '0');
     const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg/kanji/${unicode}.svg`;
@@ -67,41 +65,44 @@ async function getKanjiPartPaths(char, position) {
         const doc = new DOMParser().parseFromString(text, "image/svg+xml");
         let paths = [];
         
-        // KanjiVG内の <g kvg:position="left" または "right"> のグループを探す
-        const gs = doc.querySelectorAll('g');
-        for (let g of gs) {
-            if (g.getAttribute('kvg:position') === position) {
-                // その部位に含まれるすべての筆画(path)を取得
-                Array.from(g.querySelectorAll('path')).forEach(p => paths.push(p.getAttribute('d')));
-                break; // 見つかったら終了
+        // 全てのグループタグを走査
+        const gs = Array.from(doc.getElementsByTagName('g'));
+        const targetGroup = gs.find(g => {
+            // kvg:position 属性を名前空間に依存せず検索
+            for (let attr of g.attributes) {
+                if (attr.name.endsWith('position') && attr.value === position) return true;
             }
+            return false;
+        });
+
+        if (targetGroup) {
+            // 特定した部位グループ内のパスのみを収集
+            Array.from(targetGroup.querySelectorAll('path')).forEach(p => {
+                const d = p.getAttribute('d');
+                if (d) paths.push(d);
+            });
         }
         
-        // 万が一見つからなかった場合の保険
-        if (paths.length === 0) {
-            return Array.from(doc.querySelectorAll('path')).map(p => p.getAttribute('d'));
-        }
         return paths;
     } catch(e) { return []; }
 }
 
 async function createCombinedSVG(henBaseChar, tsukuriBaseChar) {
-    // それぞれの漢字から必要なパーツだけを抽出
     const henPaths = await getKanjiPartPaths(henBaseChar, "left");
     const tsukuriPaths = await getKanjiPartPaths(tsukuriBaseChar, "right");
     
-    // KanjiVGは元々 109x109 のサイズで作られており、偏と旁のパスもすでに適切な位置・サイズになっています。
-    // そのため、scaleやtranslateで歪ませる必要がなく、そのまま描画するだけで完璧な合字になります。
+    // パーツ同士は元の座標を維持しているため、重ねるだけで正しい位置に配置されます
     let combined = `<svg viewBox="0 0 109 109" xmlns="http://www.w3.org/2000/svg">`;
     
-    combined += `<g>`;
-    // 書道的な自然さを出すため、線の太さをKanjiVG標準の「3」に設定
-    henPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`);
-    combined += `</g>`;
+    // 偏の描画
+    henPaths.forEach(d => {
+        combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+    });
     
-    combined += `<g>`;
-    tsukuriPaths.forEach(d => combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`);
-    combined += `</g>`;
+    // 旁の描画
+    tsukuriPaths.forEach(d => {
+        combined += `<path d="${d}" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+    });
     
     combined += `</svg>`;
     return combined;
